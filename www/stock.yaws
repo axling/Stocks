@@ -1,0 +1,63 @@
+<html>
+
+<erl>
+out(A) ->
+    case queryvar(A, "name") of
+	{ok, StockName} ->	    
+	    Stocks = db:get_stocks("c:/erlang_proj/svn/stocks/db/" ++ StockName ++ ".dets"),
+	    DataSet = [Value || {Date, Value} <- Stocks],
+	    MinimizedData = strip_data(DataSet, 250),
+	    Max = lists:max(MinimizedData),
+	    Min = lists:min(MinimizedData),
+	    ChartString = build_chart_string(StockName, MinimizedData, Max, Min, 800, 300),
+	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
+		     {form, [{method, "post"}, {action, "stock.yaws"}], 
+		      [{input, [{type, "text"}, {name, "text"}]},
+		       {input, [{type, "submit"}, {value, "ok"}]}]},
+		     {table, [], 
+		      [{tr, [], [{th, [], "Date"}, {th, [], "Value"}]}] ++ 
+		      lists:map(
+			fun({{Year, Month, Day}, Value}) ->
+				{tr, [], [{td, [], io_lib:format("~p-~p-~p", [Year, Month, Day])},
+					  {td, [], io_lib:format("~p", [Value])}]}
+			end, Stocks)}]};	
+	undefined ->
+	    {html, "No stock has been selected"}
+    end.
+
+build_chart_string(Title, DataSet, Max, Min, XSize, YSize) ->
+    "http://chart.apis.google.com/chart?chtt=" ++ Title ++ "&amp;chs=" ++ integer_to_list(XSize) ++ "x" ++ 
+	integer_to_list(YSize) ++ "&amp;cht=lc&amp;" ++ "chd=t:" ++ append_data(DataSet) ++ "&amp;chds=" ++ 
+	integer_to_list(trunc(Min)) ++ "," ++ integer_to_list(trunc(Max) + 1).
+	
+append_data([Data]) ->
+    case is_float(Data) of
+	true ->
+	    [Float] = io_lib:format("~.1f", [Data]),
+	    Float;
+	false ->
+	    integer_to_list(Data)
+    end;
+append_data([Data | DataSet]) ->
+    case is_float(Data) of
+	true ->
+	    [Float] = io_lib:format("~.1f", [Data]),
+	    Float ++ "," ++ append_data(DataSet);
+	false ->
+	    integer_to_list(Data) ++ "," ++ append_data(DataSet)
+    end.
+    
+strip_data(DataSet, Max) when Max < length(DataSet) ->
+    Steps = trunc(length(DataSet)/Max),
+    {_, Result, _} = 
+	lists:foldr(
+	  fun(Value, {1, AccList, Max}) ->
+		  {Max, [Value |AccList], Max};
+	     (Value, {Step, AccList, Max}) ->
+		  {Step-1, AccList, Max}
+	  end, {Steps, [], Steps}, DataSet),
+    Result.
+    
+</erl>
+
+</html>

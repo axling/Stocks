@@ -1,0 +1,15 @@
+<html>
+
+<erl>
+out(A) ->
+    Stocks = db:get_stocks("c:/erlang_proj/svn/stocks/db/ericsson.dets"),
+    {ehtml, [{table, [], 
+	      [{tr, [], [{th, [], "Date"}, {th, [], "Value"}]}] ++ 
+	     lists:map(
+	       fun({{Year, Month, Day}, Value}) ->
+		       {tr, [], [{td, [], io_lib:format("~p-~p-~p", [Year, Month, Day])},
+				 {td, [], io_lib:format("~p", [Value])}]}
+	       end, Stocks)}]}.
+</erl>
+
+</html>

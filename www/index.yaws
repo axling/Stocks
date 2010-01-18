@@ -1,0 +1,19 @@
+<html>
+
+<erl>
+out(A) ->
+    BaseDir = "c:/erlang_proj/svn/stocks/db/",
+    {ok, FileNames} = file:list_dir("c:/erlang_proj/svn/stocks/db/"),
+    FilteredFileNames = lists:sort(lists:filter(fun(File) -> filelib:is_file(filename:join(BaseDir, File)) and
+							    (filename:extension(File)==".dets") end, 
+					   FileNames)),
+    {ehtml, [{h1, [], ["Stocks"]},
+	     {ul, [], 
+	      lists:map(fun(Stock) ->
+				StockName = filename:basename(Stock, ".dets"),
+				{li, [], [{a, [{href, "stock.yaws?name=" ++ StockName}], 
+					  [StockName]}]}
+			end, FilteredFileNames)}]}.
+</erl>
+
+</html>
