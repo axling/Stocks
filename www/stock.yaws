@@ -3,8 +3,9 @@
 <erl>
 out(A) ->
     case queryvar(A, "name") of
-	{ok, StockName} ->	    
-	    Stocks = db:get_stocks("c:/erlang_proj/svn/stocks/db/" ++ StockName ++ ".dets"),
+	{ok, StockName} ->
+	    %% Here I assume that we are running yaws from the root directory
+	    Stocks = db:get_stocks(filename:join(filename:absname("db"), StockName ++ ".dets")),
 	    DataSet = [Value || {Date, Value} <- Stocks],
 	    MinimizedData = strip_data(DataSet, 250),
 	    Max = lists:max(MinimizedData),
