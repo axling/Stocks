@@ -12,7 +12,8 @@
       <div id="header" >
 	<erl>
 out(A) ->
-    {ehtml, [{ul, [{class, "menu"}], 
+    {ehtml, [{div, [{class, "headline"}], [Stocks]},
+	     {ul, [{class, "menu"}], 
 	      [{li, [], 
 		[{a, [{href, "index.yaws"}], [{span, [], ["Start"]}]}]},
 	       {li, [], 
