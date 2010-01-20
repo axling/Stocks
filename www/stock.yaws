@@ -1,34 +1,68 @@
-<html>
-
-<erl>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd" >
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en" >
+  <head>
+    <title>Stocks</title>
+    <meta http-equiv="content-type" content="text/html;charset=utf-8" />
+    <link rel="stylesheet" href="css/layout.css" type="text/css" />
+    <link rel="stylesheet" href="css/menu.css" type="text/css" />
+    <link rel="stylesheet" href="css/tables.css" type="text/css" />
+  </head>
+  <body>
+    <div id="pagewidth" >
+      <div id="header" >
+	<erl>
+out(A) ->
+    {ehtml, [{ul, [{class, "menu"}], 
+	      [{li, [], 
+		[{a, [{href, "index.yaws"}], [{span, [], ["Start"]}]}]},
+	       {li, [], 
+		[{a, [{href, "stock.yaws"}, {class, active}], [{span, [], ["Stocks"]}]}]}]}]}.
+	</erl>
+      </div>
+      <div id="wrapper" class="clearfix" >
+	<div id="twocols" class="clearfix"> 
+	  <div id="maincol" >
+	    <erl>
 out(A) ->
     case queryvar(A, "name") of
 	{ok, StockName} ->
 	    %% Here I assume that we are running yaws from the root directory
 	    Stocks = db:get_stocks(filename:join(filename:absname("db"), StockName ++ ".dets")),
-	    DataSet = [Value || {Date, Value} <- Stocks],
-	    MinimizedData = strip_data(DataSet, 250),
-	    Max = lists:max(MinimizedData),
-	    Min = lists:min(MinimizedData),
-	    ChartString = build_chart_string(StockName, MinimizedData, Max, Min, 800, 300),
+	    MonthStocks = lists:reverse(lists:nthtail(length(Stocks)-100, Stocks)),
+	    ChartString = build_chart_string(StockName, Stocks, 100, 400, 200),
+	    %% Remove all values from stocks that are odler than 30 days
 	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
 		     {form, [{method, "post"}, {action, "stock.yaws"}], 
 		      [{input, [{type, "text"}, {name, "text"}]},
 		       {input, [{type, "submit"}, {value, "ok"}]}]},
-		     {table, [], 
-		      [{tr, [], [{th, [], "Date"}, {th, [], "Value"}]}] ++ 
+		     {table, [{class, "stock_table"}], 
+		      [{tr, [], [{th, [{colspan, 2}], [StockName ++ " values"]}]},
+		       {tr, [], [{td, [{class, "width"}], "Date"}, {td, [{class, "adjacent"}], "Value"}]}] ++ 
 		      lists:map(
 			fun({{Year, Month, Day}, Value}) ->
 				{tr, [], [{td, [], io_lib:format("~p-~p-~p", [Year, Month, Day])},
-					  {td, [], io_lib:format("~p", [Value])}]}
-			end, Stocks)}]};	
+					  {td, [{class, "adjacent"}], io_lib:format("~p", [Value])}]}
+			end, MonthStocks)}]};	
 	undefined ->
 	    {html, "No stock has been selected"}
     end.
 
-build_chart_string(Title, DataSet, Max, Min, XSize, YSize) ->
-    "http://chart.apis.google.com/chart?chtt=" ++ Title ++ "&amp;chs=" ++ integer_to_list(XSize) ++ "x" ++ 
-	integer_to_list(YSize) ++ "&amp;cht=lc&amp;" ++ "chd=t:" ++ append_data(DataSet) ++ "&amp;chds=" ++ 
+build_chart_string(Title, FullDataSet, Days, XSize, YSize) ->
+    PeriodSet= lists:reverse(lists:nthtail(length(FullDataSet)-Days, FullDataSet)),
+    DataSet = [Value || {Date, Value} <- PeriodSet],
+    StrippedDataSet =
+	if 
+	    length(DataSet) > XSize ->
+		strip_data(DataSet, XSize);
+	    true ->
+		DataSet
+	end,
+    io:format("Length: ~p~nDataset: ~p~n", [length(StrippedDataSet), StrippedDataSet]),
+    Max = lists:max(StrippedDataSet),
+    Min = lists:min(StrippedDataSet),
+    "http://chart.apis.google.com/chart?chtt=" ++ Title ++ ":+last+" ++ integer_to_list(Days) ++ "+days" ++ "&amp;chs=" ++ 
+	integer_to_list(XSize) ++ "x" ++ integer_to_list(YSize) ++ "&amp;cht=lc&amp;" ++ "chd=t:"
+	++ append_data(StrippedDataSet) ++ "&amp;chds=" ++ 
 	integer_to_list(trunc(Min)) ++ "," ++ integer_to_list(trunc(Max) + 1).
 	
 append_data([Data]) ->
@@ -59,6 +93,15 @@ strip_data(DataSet, Max) when Max < length(DataSet) ->
 	  end, {Steps, [], Steps}, DataSet),
     Result.
     
-</erl>
+	</erl>
+        </div>
+<div id="rightcol" ></div>
+	    </div> 
+<div id="leftcol" ></div>
+</div>
+	<div id="footer" >
+	</div>
+	</div>
+</body>
 
 </html>
