@@ -6,14 +6,15 @@
     <link rel="stylesheet" href="css/layout.css" type="text/css" />
     <link rel="stylesheet" href="css/menu.css" type="text/css" />
     <link rel="stylesheet" href="css/tables.css" type="text/css" />
+    <link rel="stylesheet" href="css/general.css" type="text/css" />
   </head>
   <body>
     <div id="pagewidth" >
       <div id="header" >
+	<div id="headline">Stocks</div>
 	<erl>
 out(A) ->
-    {ehtml, [{div, [{class, "headline"}], [Stocks]},
-	     {ul, [{class, "menu"}], 
+    {ehtml, [{ul, [{class, "menu"}], 
 	      [{li, [], 
 		[{a, [{href, "index.yaws"}], [{span, [], ["Start"]}]}]},
 	       {li, [], 

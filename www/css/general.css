@@ -1,67 +1,10 @@
-body,html
+#headline
 {
-    margin:0px;
-    padding:0px;
+    position:absolute;
+    letter-spacing: 4px;
+    font: italic small-caps 30px arial, sans-serif;
+    top: 0;
+    right: 0;
+    margin-right: 200px;
+    margin-top: 20px;
 }
-#container
-{
-    width: 1024px;
-    margin: 10px;
-    padding: 0px;
-}
-ul {vertical-align:bottom;}
-#top
-{    
-    border-bottom: 1px solid black;
-    height: 100px;
-    width: 100%;
-    clear: both;
-    margin: 0px;    
-}
-#left_pad
-{
-    height: 100%;    
-    width: 200px;
-    float: left;
-}
-#main
-{    
-    width: 624px;
-    margin-left: 200px;
-    padding-bottom: 10px;
-    padding-top: 10px;
-    }
-#right_pad
-{
-    height:100%;
-    margin-left: 824px;
-    float: right;
-    width: 200px;
-}
-#bottom
-{
-    border-top: 1px solid black;
-    clear: both;
-    height: 100px;
-    width: 100%;
-}
-.stock_table
-{
-    border-collapse:collapse;
-    border: 1px solid black;
-    max-width: 200px;
-    min-width: 150px;
-    text-align: center;
-    margin-left: 10px;
-}
-p
-{
-    font-family: Arial, Helvetica, sans-serif;
-}
-#heading
-{
-    font-family: sans-serif;
-    font-size: large;
-    font-variant: small-caps;    
-}
-
