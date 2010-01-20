@@ -1,0 +1,25 @@
+table {
+    font: 11px/24px Verdana, Arial, Helvetica, sans-serif;
+    border-collapse: collapse;
+    width: 170px;
+}
+th {
+    padding: 0 0.5em;
+    text-align: left;
+}
+tr.yellow td {
+    border-top: 1px solid #FB7A31;
+    border-bottom: 1px solid #FB7A31;
+    background: #FFC;
+}
+td {
+    border-bottom: 1px solid #CCC;
+    padding: 0 0.5em;
+}
+td.width {
+    width: 100px;
+}
+td.adjacent {
+    border-left: 1px solid #CCC;
+    text-align: center;
+}
