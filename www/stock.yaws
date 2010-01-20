@@ -62,7 +62,9 @@ build_chart_string(Title, FullDataSet, Days, XSize, YSize) ->
     io:format("Length: ~p~nDataset: ~p~n", [length(StrippedDataSet), StrippedDataSet]),
     Max = lists:max(StrippedDataSet),
     Min = lists:min(StrippedDataSet),
-    "http://chart.apis.google.com/chart?chtt=" ++ Title ++ ":+last+" ++ integer_to_list(Days) ++ "+days" ++ "&amp;chs=" ++ 
+    "http://chart.apis.google.com/chart?chtx=x&amp;chtr=0," ++ integer_to_list(round(Min)) 
+	++ "," ++ integer_to_list(round(Max)) ++
+	"|&amp;chtt=" ++ Title ++ ":+last+" ++ integer_to_list(Days) ++ "+days" ++ "&amp;chs=" ++ 
 	integer_to_list(XSize) ++ "x" ++ integer_to_list(YSize) ++ "&amp;cht=lc&amp;" ++ "chd=t:"
 	++ append_data(StrippedDataSet) ++ "&amp;chds=" ++ 
 	integer_to_list(trunc(Min)) ++ "," ++ integer_to_list(trunc(Max) + 1).

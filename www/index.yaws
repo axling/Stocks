@@ -27,7 +27,7 @@ out(A) ->
 
 out(A) ->
     BaseDir = filename:join(filename:absname("."), "db"),
-    {ok, FileNames} = file:list_dir("c:/erlang_proj/svn/stocks/db/"),
+    {ok, FileNames} = file:list_dir(BaseDir),
     FilteredFileNames = lists:sort(lists:filter(fun(File) -> filelib:is_file(filename:join(BaseDir, File)) and
 							    (filename:extension(File)==".dets") end, 
 						FileNames)),
