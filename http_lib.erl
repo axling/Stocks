@@ -7,7 +7,7 @@
 %%%-------------------------------------------------------------------
 -module(http_lib).
 
--export([download/1]).
+-export([download/1, omx_req/1]).
 
 %%Side-effects
 download(Page) ->
@@ -15,5 +15,14 @@ download(Page) ->
     {ok, {_,Headers, Body}} = http:request(Page),
     inets:stop(),
     {Headers, Body}.
+
+omx_req(Xml) ->
+    inets:start(),
+    {ok, {_, Headers, Body}} = http:request(
+				 post,
+				 {"http://www.nasdaqomxnordic.com/webproxy/DataFeedProxy.aspx",
+				  [], "application/x-www-form-urlencoded", Xml}, [], []),
+    inets:stop(),
+    {Body}.
 
 
