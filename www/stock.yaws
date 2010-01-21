@@ -51,7 +51,7 @@ out(A) ->
 
 build_chart_string(Title, FullDataSet, Days, XSize, YSize) ->
     PeriodSet= lists:reverse(lists:nthtail(length(FullDataSet)-Days, FullDataSet)),
-    DataSet = [Value || {Date, Value} <- PeriodSet],
+    {DateSet, DataSet} = lists:unzip(PeriodSet),
     StrippedDataSet =
 	if 
 	    length(DataSet) > XSize ->
@@ -59,10 +59,13 @@ build_chart_string(Title, FullDataSet, Days, XSize, YSize) ->
 	    true ->
 		DataSet
 	end,
-    io:format("Length: ~p~nDataset: ~p~n", [length(StrippedDataSet), StrippedDataSet]),
     Max = lists:max(StrippedDataSet),
     Min = lists:min(StrippedDataSet),
-    "http://chart.apis.google.com/chart?chtx=x&amp;chtr=0," ++ integer_to_list(round(Min)) 
+    Interval = round(Max-Min/4),
+    FilteredDateSet = strip_data(DateSet, 6),
+    io_lib:format("http://chart.apis.google.com/chart?chtx=y&amp;chtr=0,"),
+
+    "http://chart.apis.google.com/chart?chtx=y&amp;chtr=0," ++ integer_to_list(round(Min)) 
 	++ "," ++ integer_to_list(round(Max)) ++
 	"|&amp;chtt=" ++ Title ++ ":+last+" ++ integer_to_list(Days) ++ "+days" ++ "&amp;chs=" ++ 
 	integer_to_list(XSize) ++ "x" ++ integer_to_list(YSize) ++ "&amp;cht=lc&amp;" ++ "chd=t:"
