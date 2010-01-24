@@ -42,7 +42,9 @@ parse_page(Page) ->
 		      Entry ->
 			  Entry
 		  end
-	  end, NewStringList).
+	  end, NewStringList),
+    lists:filter(fun(undefined) -> false; (_Else) -> true end, ResultList).
+
 
 match(String, RegExp) ->
     re:run(String, RegExp, [{capture, all_but_first, list}]).
@@ -50,9 +52,17 @@ match(String, RegExp) ->
 match_type(String) ->
     case match(String, ?ROW) of
 	{match, [Date, Max, Min, Closing, Average, Volume, TurnOver, Completions]} ->
-	    {Date, Max, Min, Closing, Average, Volume, TurnOver, Completions};
+	    {date_lib:convert_date_s_e(Date), 
+ 	     to_number(Max), 
+ 	     to_number(Min), 
+ 	     to_number(Closing), 
+ 	     to_number(Average), 
+ 	     to_integer(Volume), 
+ 	     to_integer(TurnOver), 
+ 	     to_integer(Completions)};
+
 	nomatch ->
-	   undefined
+	    undefined
     end.
 
 is_match(String, RegExp) ->
@@ -62,3 +72,23 @@ is_match(String, RegExp) ->
 	_Else ->
 	    true
     end.
+
+to_number([]) ->
+    undefined;
+to_number(Num) ->
+    StrNum = lists:append(string:tokens(Num, " ")),
+    try 
+	list_to_float(StrNum)
+    catch
+	_:_ ->
+	    list_to_integer(StrNum)
+    end.
+
+to_integer([]) ->
+    undefined;
+to_integer(Num) ->
+    list_to_integer(lists:append(
+		      string:tokens(Num, " "))).
+
+
+
