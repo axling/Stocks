@@ -9,15 +9,12 @@
 
 -behaviour(gen_server).
 
+-include("mnesia_defs.hrl").
+
 %% API
 -export([start_link/0,
-	 create_table/1,
-	 table_exists/1,
 	 create_entry/1,
-	 dump_to_disc/1,
-	 set_backup_interval/2,
 	 delete_entry/2,
-	 delete_table/1,
 	 get_entry/2]).
 
 %% gen_server callbacks
@@ -37,28 +34,13 @@
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the server
 %%--------------------------------------------------------------------
-create_table(TableName) ->
-    ok.
-
 create_entry(Entry) ->
     gen_server:call(?MODULE, {create_entry, Entry}).
-
-delete_table(TableName) ->
-    ok.
 
 delete_entry(TableName, Entry) ->
     ok.
 
-dump_to_disc(TableName) ->
-    ok.
-
 get_entry(TableName, Key) ->
-    ok.
-
-set_backup_interval(TableName, Interval) ->
-    ok.
-
-table_exists(TableName) ->
     ok.
 
 q(TableName, Query) ->
@@ -80,12 +62,23 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
     process_flag(trap_exit, true),
-    Stocks = filename:join("db", ?STOCKS),
-    Company = filename:join("db", ?COMPANY),
-    StocksTableHandle = init_table(?STOCKS, stocks),
-    CompanyTableHandle = init_table(?COMPANY, company),    
-    {ok, #state{tables = [{stocks, StocksTableHandle},
-			  {company, CompanyTableHandle}]}}.
+    case mnesia:start() of
+	ok ->
+	    case mnesia:create_table(stocks, [{type, bag},
+					      {disc_copies, [node()]},
+					      {attributes,
+					       record_info(fields, stocks)}]) of
+		{atomic, ok} ->
+		    {ok, #state{}};
+		{aborted, {already_exists, stocks}} ->
+		    ok = mnesia:wait_for_tables([stocks], 10000),
+		    {ok, #state{}};
+		{aborted, Reason} ->
+		    {stop, Reason}
+	    end;
+	{error, Reason} ->
+	    {stop, Reason}
+    end.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -96,14 +89,15 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call({create_entry, Entry}, _From, #state{tables=Tables}=State) ->
-    case lists:keymember(element(1, Entry), 1, Tables) of
-	true ->
-	    {_, Tid} = lists:keyfind(element(1,Entry), 1, Tables),
-	    true =  ets:insert(Tid, Entry),
+handle_call({create_entry, Entry}, _From, State) ->
+    case mnesia:transaction(
+	   fun () ->
+		   mnesia:write(Entry)
+	   end) of
+	{atomic, ok} ->
 	    {reply, ok, State};
-	false ->
-	    {reply, table_not_existing, State}
+	{aborted, Reason} ->
+	    {reply, {error, Reason}, State}
     end.
 
 %%--------------------------------------------------------------------
@@ -132,12 +126,7 @@ handle_info(_Info, State) ->
 %% The return value is ignored.
 %%--------------------------------------------------------------------
 terminate(_Reason, #state{tables=Tables}) ->
-    lists:foreach(
-      fun({TableName, Tid}) ->
-	      save_table(TableName, Tid),
-	      ets:delete(Tid)
-      end, Tables).
-
+    mnesia:stop().
 
 %%--------------------------------------------------------------------
 %% Func: code_change(OldVsn, State, Extra) -> {ok, NewState}
@@ -149,34 +138,3 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-init_table(TableFile, TableName) ->
-    case filelib:is_file(TableFile) of
-	%% Table exists, load it into ets
-	true ->
-	    {ok, TableName} = dets:open_file(TableName, [{file, TableFile}, {type,bag}, {keypos,2}]),
-	    Tid = ets:new(TableName, [bag, {keypos,2}]),
-	    true = ets:from_dets(TableName, TableName),
-	    Tid;
-	%% Table doesnt exist, create ets table
-	false ->
-	    Tid = ets:new(TableName, [bag, {keypos,2}])	    
-    end.
-
-save_table(TableName, Tid) ->
-    FileName = filename:join("db", atom_to_list(TableName) ++ ".dets"),
-    case filelib:is_file(FileName) of	
-	true ->
-	    {ok, TableName} = dets:open_file(TableName, 
-					     [{file, FileName},
-					      {type,bag}, {keypos,2}]),
-	    true = ets:to_dets(Tid, TableName),
-	    ok;
-	false ->
-	    {ok, TableName} = dets:open_file(TableName, 
-					     [{file, FileName},
-					      {type,bag}, {keypos,2}]),
-	    true = ets:to_dets(Tid, TableName),
-	    ok
-    end.
-	    
-	

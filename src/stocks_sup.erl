@@ -25,7 +25,11 @@
 %% Description: Starts the supervisor
 %%--------------------------------------------------------------------
 start() ->
-    start_link().
+    spawn_link(fun() ->
+		       start_link(),
+		       %% infinite loop, ugly solution for now
+		       loop()
+	       end).
 
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
@@ -52,3 +56,7 @@ init([]) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+loop() ->
+    timer:sleep(100),
+    loop().

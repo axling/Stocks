@@ -20,7 +20,7 @@ download_stock_data(Instrument, StartDate, EndDate) ->
     StartDateString = date_lib:convert_date_e_s(StartDate),
     EndDateString = date_lib:convert_date_e_s(EndDate),
     inets:start(),
-    %%http:set_options([{proxy, {{"www-proxy.ericsson.se", 8080}, ["localhost"]}}]),
+    http:set_options([{proxy, {{"www-proxy.ericsson.se", 8080}, ["localhost"]}}]),
     Request = 
 	"<post>\n"
 	++ "<param name=\"SubSystem\" value=\"History\"/>\n"
