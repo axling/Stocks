@@ -25,32 +25,44 @@ out(A) ->
 	<div id="twocols" class="clearfix"> 
 	  <div id="maincol" >
 	    <erl>
+-include("include/mnesia_defs.hrl").
+-include_lib("stdlib/include/qlc.hrl").
 out(A) ->
     case queryvar(A, "name") of
-	{ok, StockName} ->
+	{ok, Instrument} ->
+	    QhCompany = db_handler:get_query_handle(company),
+	    [Company] = db_handler:q(qlc:q([C#company.name || C <- QhCompany, 
+							      C#company.instrument==Instrument])),
 	    %% Here I assume that we are running yaws from the root directory
-	    Stocks = db:get_stocks(filename:join(filename:absname("db"), StockName ++ ".dets")),
-	    MonthStocks = lists:reverse(lists:nthtail(length(Stocks)-100, Stocks)),
-	    ChartString = build_chart_string(StockName, Stocks, 100, 400, 200),
-	    %% Remove all values from stocks that are odler than 30 days
+	    QhStocks = db_handler:get_query_handle(stocks),
+	    StockQuery = qlc:q([{Stock#stocks.date, Stock#stocks.closing} ||
+			      Stock <- QhStocks, 
+			      Stock#stocks.company == Company]),
+	    Stocks = lists:sort(
+		       fun({A, _}, {B, _}) ->
+			       date_lib:is_greater(B, A)
+		       end, db_handler:q(StockQuery)),
+	    MonthStocks = lists:nthtail(length(Stocks)-20, Stocks),
+	    ChartString = build_chart_string(Company, Stocks, 20, 400, 200),
+	    %% Remove all values from stocks that are older than 30 days
 	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
 		     {form, [{method, "post"}, {action, "stock.yaws"}], 
 		      [{input, [{type, "text"}, {name, "text"}]},
 		       {input, [{type, "submit"}, {value, "ok"}]}]},
 		     {table, [{class, "stock_table"}], 
-		      [{tr, [], [{th, [{colspan, 2}], [StockName ++ " values"]}]},
+		      [{tr, [], [{th, [{colspan, 2}], [Company ++ " values"]}]},
 		       {tr, [], [{td, [{class, "width"}], "Date"}, {td, [{class, "adjacent"}], "Value"}]}] ++ 
 		      lists:map(
-			fun({{Year, Month, Day}, Value}) ->
-				{tr, [], [{td, [], io_lib:format("~p-~p-~p", [Year, Month, Day])},
+			fun({Date, Value}) ->
+				{tr, [], [{td, [], [date_lib:convert_date_e_s(Date)]},
 					  {td, [{class, "adjacent"}], io_lib:format("~p", [Value])}]}
-			end, MonthStocks)}]};	
+			end, lists:reverse(MonthStocks))}]};	
 	undefined ->
 	    {html, "No stock has been selected"}
     end.
 
 build_chart_string(Title, FullDataSet, Days, XSize, YSize) ->
-    PeriodSet= lists:reverse(lists:nthtail(length(FullDataSet)-Days, FullDataSet)),
+    PeriodSet = lists:nthtail(length(FullDataSet)-Days, FullDataSet),
     {DateSet, DataSet} = lists:unzip(PeriodSet),
     StrippedDataSet =
 	if 
@@ -63,8 +75,6 @@ build_chart_string(Title, FullDataSet, Days, XSize, YSize) ->
     Min = lists:min(StrippedDataSet),
     Interval = round(Max-Min/4),
     FilteredDateSet = strip_data(DateSet, 6),
-    io_lib:format("http://chart.apis.google.com/chart?chtx=y&amp;chtr=0,"),
-
     "http://chart.apis.google.com/chart?chtx=y&amp;chtr=0," ++ integer_to_list(round(Min)) 
 	++ "," ++ integer_to_list(round(Max)) ++
 	"|&amp;chtt=" ++ Title ++ ":+last+" ++ integer_to_list(Days) ++ "+days" ++ "&amp;chs=" ++ 

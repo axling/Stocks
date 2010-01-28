@@ -24,20 +24,18 @@ out(A) ->
 	<div id="twocols" class="clearfix"> 
 	  <div id="maincol" >
 	    <erl>
-
+-include("include/mnesia_defs.hrl").
+-include_lib("stdlib/include/qlc.hrl").
 out(A) ->
-    BaseDir = filename:join(filename:absname("."), "db"),
-    {ok, FileNames} = file:list_dir(BaseDir),
-    FilteredFileNames = lists:sort(lists:filter(fun(File) -> filelib:is_file(filename:join(BaseDir, File)) and
-							    (filename:extension(File)==".dets") end, 
-						FileNames)),
+    Qh = db_handler:get_query_handle(company),
+    Query = qlc:q([Company || Company <- Qh]),
+    Companies = lists:sort(db_handler:q(Query)),
     {ehtml, [{h1, [], ["Stocks"]},
 	     {ul, [], 
-	      lists:map(fun(Stock) ->
-				StockName = filename:basename(Stock, ".dets"),
-				{li, [], [{a, [{href, "stock.yaws?name=" ++ StockName}], 
-					  [StockName]}]}
-			end, FilteredFileNames)}]}.
+	      lists:map(fun(#company{instrument=Instrument, name=Name}) ->
+				{li, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], 
+					  [Name]}]}
+			end, Companies)}]}.
 	</erl>
         </div>
 <div id="rightcol" ></div>

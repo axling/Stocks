@@ -15,7 +15,10 @@
 -export([start_link/0,
 	 create_entry/1,
 	 delete_entry/2,
-	 get_entry/2]).
+	 get_entry/2,
+	 get_query_handle/1,
+	 ready/0,
+	 q/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -35,16 +38,22 @@
 %% Description: Starts the server
 %%--------------------------------------------------------------------
 create_entry(Entry) ->
-    gen_server:call(?MODULE, {create_entry, Entry}).
+    gen_server:call(?MODULE, {create_entry, Entry}, infinity).
 
 delete_entry(TableName, Entry) ->
     ok.
 
+get_query_handle(TableName) ->
+    gen_server:call(?MODULE, {get_query_handle, TableName}, infinity).
+
 get_entry(TableName, Key) ->
     ok.
 
-q(TableName, Query) ->
-    ok.
+q(Query) ->
+    gen_server:call(?MODULE, {q, Query}, infinity).
+
+ready() ->
+    gen_server:call(?MODULE, ready, infinity).
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -64,16 +73,11 @@ init([]) ->
     process_flag(trap_exit, true),
     case mnesia:start() of
 	ok ->
-	    case mnesia:create_table(stocks, [{type, bag},
-					      {disc_copies, [node()]},
-					      {attributes,
-					       record_info(fields, stocks)}]) of
-		{atomic, ok} ->
+	    case create_tables([{stocks, bag, record_info(fields, stocks)}, 
+				{company, set, record_info(fields, company)}]) of
+		ok ->
 		    {ok, #state{}};
-		{aborted, {already_exists, stocks}} ->
-		    ok = mnesia:wait_for_tables([stocks], 10000),
-		    {ok, #state{}};
-		{aborted, Reason} ->
+		{error, Reason} ->
 		    {stop, Reason}
 	    end;
 	{error, Reason} ->
@@ -83,7 +87,7 @@ init([]) ->
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
 %%                                      {reply, Reply, State, Timeout} |
-%%                                      {noreply, State} |
+%%                        record_info(fields, TableName)              {noreply, State} |
 %%                                      {noreply, State, Timeout} |
 %%                                      {stop, Reason, Reply, State} |
 %%                                      {stop, Reason, State}
@@ -98,7 +102,20 @@ handle_call({create_entry, Entry}, _From, State) ->
 	    {reply, ok, State};
 	{aborted, Reason} ->
 	    {reply, {error, Reason}, State}
-    end.
+    end;
+handle_call({q,  Query}, _From, State) ->
+    {atomic, Result} = 
+	mnesia:transaction(
+	  fun() ->
+		  qlc:e(Query)
+	  end),
+    {reply, Result, State};
+handle_call({get_query_handle, TableName}, _From, State) ->
+    Table = mnesia:table(TableName),
+    {reply, Table, State};
+
+handle_call(ready, _From, State) ->
+    {reply, ok, State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -138,3 +155,27 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
+create_table({TableName, Type, Fields}) ->
+    case mnesia:create_table(TableName, [{type, Type},
+					 {disc_copies, [node()]},
+					 {attributes,
+					  Fields}]) of
+	{atomic, ok} ->
+	    ok;
+	{aborted, {already_exists, TableName}} ->
+	    ok = mnesia:wait_for_tables([TableName], 100000);	    
+	{aborted, Reason} ->
+	    {error, Reason}
+    end.
+
+create_tables([]) ->
+    ok;
+create_tables([First |TableList]) ->
+    case create_table(First) of
+	ok ->
+	    create_tables(TableList);
+	{error, Reason} ->
+	    {error, Reason}
+    end.
+	
+

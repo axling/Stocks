@@ -18,9 +18,8 @@ download(Page) ->
 
 download_stock_data(Instrument, StartDate, EndDate) ->
     StartDateString = date_lib:convert_date_e_s(StartDate),
-    EndDateString = date_lib:convert_date_e_s(EndDate),
-    inets:start(),
-    http:set_options([{proxy, {{"www-proxy.ericsson.se", 8080}, ["localhost"]}}]),
+    EndDateString = date_lib:convert_date_e_s(EndDate),   
+    
     Request = 
 	"<post>\n"
 	++ "<param name=\"SubSystem\" value=\"History\"/>\n"
@@ -42,7 +41,6 @@ download_stock_data(Instrument, StartDate, EndDate) ->
 					       [], "application/x-www-form-urlencoded;charset=UTF-8", 
 					       "xmlquery=" ++ UrlEncodedReq}, 
 					[], []),
-    inets:stop(),
     Result.
 
 
