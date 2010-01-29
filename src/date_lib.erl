@@ -2,7 +2,8 @@
 
 -export([convert_date_e_s/1, convert_date_s_e/1,
 	 is_greater/2, get_latest_date/1,
-	 is_less_or_equal/2]).
+	 is_less_or_equal/2, today/0, today_time/0,
+	 tomorrow/0, seconds_until_time/1]).
 
 
 convert_date_e_s({Year, Month, Day}) 
@@ -55,5 +56,29 @@ get_latest_date([FirstDate | Dates], CompDate) ->
 	    get_latest_date(Dates, CompDate)
     end.
     
+today() ->   
+    {Date, _Time} = today_time(),
+    Date.
+
+today_time() ->
+    calendar:now_to_local_time(now()).
+
+tomorrow() ->
+    calendar:gregorian_days_to_date(calendar:date_to_gregorian_days(today()) + 1).
+
+seconds_until_time(DateTime) ->
+    Until = calendar:datetime_to_gregorian_seconds(DateTime),
+    Now = calendar:datetime_to_gregorian_seconds(today_time()),
+    Diff = Until - Now,
+    if 
+	Diff =< 0 ->
+	    erlang:error(until_date_in_the_past);
+	true ->
+	    Diff
+    end.
+
+date_minus_days(Date, Days) ->
+    calendar:gregorian_days_to_date(calendar:date_to_gregorian_days(Date) - Days).
     
+       
     

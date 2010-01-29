@@ -56,18 +56,9 @@ init([]) ->
     ok = db_handler:ready(),
     ok = inets:start(),
     http:set_options([{proxy, {{"www-proxy.ericsson.se", 8080}, ["localhost"]}}]),
-    Qh = db_handler:get_query_handle(company),
-    Q = qlc:q([Company || Company <- Qh]),
-    Companies = db_handler:q(Q),
-    UpdatingCompanies = 
-	lists:map(
-	  fun(#company{name=Name, instrument=Instrument}) ->
-		  Pid = spawn(?MODULE, updating_content, [self(), Name, Instrument]),
-		  MonitorRef = erlang:monitor(process, Pid),
-		  TimerRef = erlang:start_timer(?UPDATE_TIMEOUT, self(), {update_timeout, {Name, Pid}}),
-		  {Name, MonitorRef, TimerRef, Pid}
-	  end, Companies),
-    erlang:start_timer(300000, self(), retry_timer_timeout),
+    UpdatingCompanies = update_from_database(),
+    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,1,0}}),
+    erlang:start_timer(Secs*1000, self(), daily_update),
     {ok, #state{updating_content=UpdatingCompanies}}.
 
 %%--------------------------------------------------------------------
@@ -100,6 +91,17 @@ handle_cast(_Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
+handle_info({timeout, _, daily_update}, #state{updating_content=Comps}=State) ->
+    lists:foreach(
+      fun({_Name, MonitorRef, TimerRef, Pid}) ->
+	      erlang:demonitor(MonitorRef),
+	      erlang:cancel_timer(TimerRef),	      
+	      exit(Pid, kill)
+      end, Comps),
+    UpdatingCompanies = update_from_database(),
+    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,1,0}}),
+    erlang:start_timer(Secs*1000, self(), daily_update),
+    {noreply, State#state{updating_content=UpdatingCompanies, retry=[]}};
 handle_info({timeout, _, retry_timer_timeout}, #state{retry=[]}=State) ->
     {noreply, State};
 handle_info({timeout, _, retry_timer_timeout}, #state{retry=RetryList}=State) ->
@@ -117,6 +119,7 @@ handle_info({timeout, _, retry_timer_timeout}, #state{retry=RetryList}=State) ->
 		  TimerRef = erlang:start_timer(?UPDATE_TIMEOUT, self(), {update_timeout, {Name, Pid}}),
 		  {Name, MonitorRef, TimerRef, Pid}
 	  end, Companies),
+    erlang:start_timer(300000, self(), retry_timer_timeout),
     {noreply, State#state{retry = [],
 			  updating_content=UpdatingCompanies}};
     
@@ -187,13 +190,29 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
+update_from_database() ->    
+    Qh = db_handler:get_query_handle(company),
+    Q = qlc:q([Company || Company <- Qh]),
+    Companies = db_handler:q(Q),
+    UpdatingCompanies = 
+	lists:map(
+	  fun(#company{name=Name, instrument=Instrument}) ->
+		  Pid = spawn(?MODULE, updating_content, [self(), Name, Instrument]),
+		  MonitorRef = erlang:monitor(process, Pid),
+		  TimerRef = erlang:start_timer(?UPDATE_TIMEOUT, self(), {update_timeout, {Name, Pid}}),
+		  {Name, MonitorRef, TimerRef, Pid}
+	  end, Companies),
+    erlang:start_timer(300000, self(), retry_timer_timeout),
+    UpdatingCompanies.
+
+
 updating_content(Pid, Name, Instrument) ->
-    {Today, _} = calendar:now_to_local_time(now()),
-   
+    Today = date_lib:today(),
+
     Qh = db_handler:get_query_handle(stocks),
     Q = qlc:q([Stock#stocks.date || Stock <- Qh, Stock#stocks.company == Name,
-		       date_lib:is_greater(Stock#stocks.date, ?BASE_DATE),
-		       date_lib:is_greater(Today, Stock#stocks.date)]),
+				    date_lib:is_greater(Stock#stocks.date, ?BASE_DATE),
+				    date_lib:is_greater(Today, Stock#stocks.date)]),
     Stocks = db_handler:q(Q),
     LatestDate = 
 	case date_lib:get_latest_date(Stocks) of
@@ -211,7 +230,7 @@ updating_content(Pid, Name, Instrument) ->
 	false ->
 	    Pid ! {updating_done, Name, self()}
     end,
-    
+
     receive
 	finish_updating ->
 	    ok
