@@ -74,7 +74,8 @@ init([]) ->
     case mnesia:start() of
 	ok ->
 	    case create_tables([{stocks, bag, record_info(fields, stocks)}, 
-				{company, set, record_info(fields, company)}]) of
+				{company, set, record_info(fields, company)},
+				{analysis, bag, record_info(fields, analysis)}]) of
 		ok ->
 		    {ok, #state{}};
 		{error, Reason} ->
@@ -163,7 +164,7 @@ create_table({TableName, Type, Fields}) ->
 	{atomic, ok} ->
 	    ok;
 	{aborted, {already_exists, TableName}} ->
-	    ok = mnesia:wait_for_tables([TableName], 100000);	    
+	    ok = mnesia:wait_for_tables([TableName], infinity);	    
 	{aborted, Reason} ->
 	    {error, Reason}
     end.

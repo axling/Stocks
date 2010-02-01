@@ -27,15 +27,35 @@ out(A) ->
 -include("include/mnesia_defs.hrl").
 -include_lib("stdlib/include/qlc.hrl").
 out(A) ->
-    Qh = db_handler:get_query_handle(company),
-    Query = qlc:q([Company || Company <- Qh]),
-    Companies = lists:sort(db_handler:q(Query)),
-    {ehtml, [{h1, [], ["Stocks"]},
-	     {ul, [], 
-	      lists:map(fun(#company{instrument=Instrument, name=Name}) ->
-				{li, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], 
-					  [Name]}]}
-			end, Companies)}]}.
+    QhAnalysis = db_handler:get_query_handle(analysis),
+    LastWorkDay = date_lib:last_workday(),
+    Query = qlc:q([A || A <- QhAnalysis, 
+			       A#analysis.date == LastWorkDay,
+			       ((A#analysis.result)#trend_result.days) == 7]),
+    Analysis = lists:sort(fun(#analysis{result=#trend_result{trend=TrendA}},
+			      #analysis{result=#trend_result{trend=TrendB}}) ->
+				  TrendA < TrendB
+			  end, db_handler:q(Query)),
+    FiveWorst = lists:sublist(Analysis, 5),
+    FiveBest = lists:nthtail(length(Analysis)-5, Analysis),
+    AnalysisTable = 
+    lists:map(
+      fun(#analysis{company=Name}) ->
+	      Q = qlc:q([A1 || A1 <- QhAnalysis, 
+			       A1#analysis.date == LastWorkDay,
+			       A1#analysis.company == Name]),
+	      StocksAnalysis = lists:sort(fun(#analysis{result=#trend_result{days=Days1}},
+					      #analysis{result=#trend_result{days=Days2}}) ->
+						  Days1 > Days2
+					  end, db_handler:q(Q)),
+	      lists:map(
+		fun(OneAnalysis) ->
+			{tr, [], [{td, [], [Name ++ ": " ++ io_lib:format("~.2f%", [(OneAnalysis#analysis.result)#trend_result.trend * 100])]}]}
+		end, StocksAnalysis)
+      end, lists:append([FiveBest, FiveWorst])),
+		
+    {ehtml, [{table, [{class, "stock_table"}], 
+	      AnalysisTable}]}.
 	</erl>
         </div>
 <div id="rightcol" ></div>

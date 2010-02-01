@@ -4,7 +4,7 @@
 -export([save_instrument/4]).
 
 save_instrument(Instrument, Name, StartDate, EndDate) ->
-    OmxReqReply = http_lib:download_stock_data(Instrument, StartDate, EndDate),
+    OmxReqReply = http_lib:download_stock_data2(Instrument, StartDate, EndDate),
     StockList = omx_parse_lib:parse_page(OmxReqReply),
     %% mnesia is started and table created
     lists:foreach(

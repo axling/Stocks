@@ -1,9 +1,10 @@
 -module(date_lib).
 
 -export([convert_date_e_s/1, convert_date_s_e/1,
-	 is_greater/2, get_latest_date/1,
+	 is_greater/2, is_greater_or_equal/2, get_latest_date/1,
 	 is_less_or_equal/2, today/0, today_time/0,
-	 tomorrow/0, seconds_until_time/1]).
+	 tomorrow/0, seconds_until_time/1, date_minus_days/2,
+	 last_workday/0, last_workday/1]).
 
 
 convert_date_e_s({Year, Month, Day}) 
@@ -34,12 +35,31 @@ is_greater(Date1, Date2) ->
     Date2ToGregorianDays = calendar:date_to_gregorian_days(Date2),
     Date1ToGregorianDays > Date2ToGregorianDays.
 
+is_greater_or_equal(Date1, Date2) ->
+    if Date1 == Date2 ->
+	    true;
+       true ->
+	    is_greater(Date1, Date2)
+    end.
+
 is_less_or_equal(Date1, Date2) ->
     if Date1 == Date2 ->
 	    true;
        true ->
 	    is_greater(Date2, Date1)
     end.
+
+last_workday() ->
+    last_workday(today()).
+
+last_workday(Date) ->
+    case calendar:day_of_the_week(Date) > 5 of
+	true ->
+	    Previous = calendar:gregorian_days_to_date(calendar:date_to_gregorian_days(Date) - 1),
+	    last_workday(Previous);
+	false ->
+	    Date
+    end.    
 
 get_latest_date([]) ->
     [];

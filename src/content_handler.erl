@@ -54,8 +54,9 @@ start_link() ->
 init([]) ->
     process_flag(trap_exit, true),
     ok = db_handler:ready(),
-    ok = inets:start(),
-    http:set_options([{proxy, {{"www-proxy.ericsson.se", 8080}, ["localhost"]}}]),
+    %%ok = inets:start(),
+    %% http:set_options([{proxy, {{"www-proxy.ericsson.se", 8080}, ["localhost"]}}]),
+    ibrowse:start(),
     UpdatingCompanies = update_from_database(),
     Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,1,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
