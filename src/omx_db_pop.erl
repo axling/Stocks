@@ -4,24 +4,29 @@
 -export([save_instrument/4]).
 
 save_instrument(Instrument, Name, StartDate, EndDate) ->
-    OmxReqReply = http_lib:download_stock_data2(Instrument, StartDate, EndDate),
+    OmxReqReply = http_lib:download_stock_data(Instrument, StartDate, EndDate),
     StockList = omx_parse_lib:parse_page(OmxReqReply),
     %% mnesia is started and table created
-    lists:foreach(
-      fun({Date, Max, Min, Closing, Average, 
-	   Volume, TurnOver, Completions}) ->
-	      Stock = #stocks{
-		company=Name,
-		date=Date,
-		highest=Max,
-		lowest=Min,
-		closing=Closing,
-		average=Average,
-		turnover=TurnOver,
-		volume=Volume,
-		completions=Completions
-	       },
-	      ok = db_handler:create_entry(Stock)
-      end, StockList).
+    {atomic, ok} =
+	mnesia:transaction(
+	  fun() ->
+		  lists:foreach(
+		    fun({Date, Max, Min, Closing, Average, 
+			 Volume, TurnOver, Completions}) ->
+			    Stock = #stocks{
+			      company=Name,
+			      date=Date,
+			      highest=Max,
+			      lowest=Min,
+			      closing=Closing,
+			      average=Average,
+			      turnover=TurnOver,
+			      volume=Volume,
+			      completions=Completions
+			     },
+			    ok = mnesia:write(Stock)
+		    end, StockList)
+	  end),
+    ok.
 
 

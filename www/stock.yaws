@@ -43,12 +43,13 @@ out(A) ->
 			       date_lib:is_greater(B, A)
 		       end, db_handler:q(StockQuery)),
 	    MonthStocks = lists:nthtail(length(Stocks)-20, Stocks),
+	    StdErrMonth = std_err([S1 || {_,S1} <- MonthStocks]),
+	    StdErrAll = std_err([S2 || {_,S2} <- Stocks]),
 	    ChartString = build_chart_string(Company, Stocks, 20, 400, 200),
 	    %% Remove all values from stocks that are older than 30 days
 	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
-		     {form, [{method, "post"}, {action, "stock.yaws"}], 
-		      [{input, [{type, "text"}, {name, "text"}]},
-		       {input, [{type, "submit"}, {value, "ok"}]}]},
+		     {p, [], [io_lib:format("Standard error for 20 days: ~.2f%", [StdErrMonth*100])]},
+		     {p, [], [io_lib:format("Standard error for all: ~.2f%", [StdErrAll*100])]},
 		     {table, [{class, "stock_table"}], 
 		      [{tr, [], [{th, [{colspan, 2}], [Company ++ " values"]}]},
 		       {tr, [], [{td, [{class, "width"}], "Date"}, {td, [{class, "adjacent"}], "Value"}]}] ++ 
@@ -117,7 +118,17 @@ strip_data(DataSet, Max) when Max < length(DataSet) ->
 		  {Step-1, AccList, Max}
 	  end, {Steps, [], Steps}, DataSet),
     Result.
-    
+
+std_err(DataSet) ->
+    Avg = lists:sum(DataSet)/length(DataSet),
+    SqrSum = 
+	lists:sum(
+	  lists:map(
+	    fun(Val) ->
+		    math:pow(Avg - Val, 2)
+	    end, DataSet)),
+    math:sqrt(SqrSum/(length(DataSet) -1))/Avg.
+
 	</erl>
         </div>
 <div id="rightcol" ></div>

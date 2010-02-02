@@ -17,13 +17,14 @@
 -define(BASE_DATE, {1987,1,1}).
 
 %% API
--export([start_link/0]).
+-export([start_link/0, update_content/0, update_content/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3, updating_content/3, dump/0]).
 
--record(state, {updating_content=[],
+-record(state, {current_company,
+		updating_content=[],
 		retry=[],
 		retry_timer}).
 
@@ -35,7 +36,13 @@
 %% Description: Starts the server
 %%--------------------------------------------------------------------
 dump() ->
-    gen_server:call(?MODULE, dump).
+    gen_server:call(?MODULE, dump, infinity).
+
+update_content() ->
+    update_content(all).
+    
+update_content(Companies) ->
+    gen_server:cast(?MODULE, {update_content, Companies}).
 
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -54,13 +61,12 @@ start_link() ->
 init([]) ->
     process_flag(trap_exit, true),
     ok = db_handler:ready(),
-    %%ok = inets:start(),
-    %% http:set_options([{proxy, {{"www-proxy.ericsson.se", 8080}, ["localhost"]}}]),
-    ibrowse:start(),
-    UpdatingCompanies = update_from_database(),
+    ok = inets:start(),
+    http:set_options([{proxy, {{"www-proxy.ericsson.se", 8080}, ["localhost"]}}]),
+    %%ibrowse:start(),
     Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,1,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
-    {ok, #state{updating_content=UpdatingCompanies}}.
+    {ok, #state{}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -72,10 +78,7 @@ init([]) ->
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
 handle_call(dump, _From, State) ->
-    {reply, State, State};
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+    {reply, State, State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -83,6 +86,31 @@ handle_call(_Request, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
+handle_cast({update_content, all}, #state{updating_content=UpdComp}=State) ->
+    Qh = db_handler:get_query_handle(company),
+    Q = qlc:q([Company || Company <- Qh]),
+    Companies = db_handler:q(Q),
+    FilteredCompanies = 
+	lists:filter(
+	  fun(Name) ->
+		  not lists:keymember(Name, 1, UpdComp)
+	  end, Companies),
+    CompaniesUpdating = update_from_database(FilteredCompanies),		      
+    {noreply, State#state{updating_content=lists:append([UpdComp, CompaniesUpdating])}};
+
+handle_cast({update_content, Companies}, #state{updating_content=UpdComp}=State) 
+  when is_list(Companies) ->
+    Qh = db_handler:get_query_handle(company),
+    Q = qlc:q([Company || Company <- Qh, lists:member(Company#company.name, Companies)]),
+    CompaniesToUpdate = db_handler:q(Q),
+    FilteredCompanies = 
+	lists:filter(
+	  fun(Name) ->
+		  not lists:keymember(Name, 1, UpdComp)
+	  end, CompaniesToUpdate),
+    CompaniesUpdating = update_from_database(FilteredCompanies),		      
+    {noreply, State#state{updating_content=lists:append([UpdComp, CompaniesUpdating])}};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -94,15 +122,19 @@ handle_cast(_Msg, State) ->
 %%--------------------------------------------------------------------
 handle_info({timeout, _, daily_update}, #state{updating_content=Comps}=State) ->
     lists:foreach(
-      fun({_Name, MonitorRef, TimerRef, Pid}) ->
+      fun({_Name, MonitorRef, Pid}) ->
 	      erlang:demonitor(MonitorRef),
-	      erlang:cancel_timer(TimerRef),	      
 	      exit(Pid, kill)
       end, Comps),
-    UpdatingCompanies = update_from_database(),
+    Qh = db_handler:get_query_handle(company),
+    Q = qlc:q([Company || Company <- Qh]),
+    Companies = db_handler:q(Q),
+    UpdatingCompanies = update_from_database(Companies),
+    ok = send_start_for_next_batch(UpdatingCompanies),
     Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,1,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
     {noreply, State#state{updating_content=UpdatingCompanies, retry=[]}};
+
 handle_info({timeout, _, retry_timer_timeout}, #state{retry=[]}=State) ->
     {noreply, State};
 handle_info({timeout, _, retry_timer_timeout}, #state{retry=RetryList}=State) ->
@@ -112,14 +144,8 @@ handle_info({timeout, _, retry_timer_timeout}, #state{retry=RetryList}=State) ->
 		  fun(#company{name=CompanyName}) ->
 			  lists:member(CompanyName, RetryList)
 		  end, db_handler:q(Q)),
-    UpdatingCompanies = 
-	lists:map(
-	  fun(#company{name=Name, instrument=Instrument}) ->
-		  Pid = spawn(?MODULE, updating_content, [self(), Name, Instrument]),
-		  MonitorRef = erlang:monitor(process, Pid),
-		  TimerRef = erlang:start_timer(?UPDATE_TIMEOUT, self(), {update_timeout, {Name, Pid}}),
-		  {Name, MonitorRef, TimerRef, Pid}
-	  end, Companies),
+    UpdatingCompanies = update_from_database(Companies),
+    ok = send_start_for_next_batch(UpdatingCompanies),
     erlang:start_timer(300000, self(), retry_timer_timeout),
     {noreply, State#state{retry = [],
 			  updating_content=UpdatingCompanies}};
@@ -128,41 +154,39 @@ handle_info({'DOWN', MonitorRef, process, Pid, _Reason},
 	    #state{updating_content=UpdCont,
 		   retry=RetryList}=State) ->
     case lists:keyfind(MonitorRef, 2, UpdCont) of
-	{Name, MonitorRef, TimerRef, Pid} ->
-	    erlang:cancel_timer(TimerRef),
-	    NewUpdcont = lists:keydelete(Name, 1, UpdCont),
+	{Name, MonitorRef, Pid} ->	    
+	    NewUpdCont = lists:keydelete(Name, 1, UpdCont),
+	    ok = send_start_for_next_batch(NewUpdCont),
 	    {noreply, State#state{retry = [Name | RetryList],
-				  updating_content = NewUpdcont}};
+				  updating_content = NewUpdCont}};
 	false ->
-	    io:format("Error: Received timeout for company that wasn't in the state ~p~n", 
+	    io:format("Error: Received exit for company that wasn't in the state ~p~n", 
 		      [State]),
 	    {noreply, State}
     end;
 
-handle_info({timeout, TimerRef, {update_timeout, {Name, Pid}}},  
-	    #state{updating_content=UpdCont,
-		   retry=RetryList}=State) ->
+handle_info({no_update_needed, Name, Pid}, #state{updating_content=UpdCont}=State) ->
     case lists:keyfind(Name, 1, UpdCont) of
-	 {Name, MonitorRef, TimerRef, Pid} ->
-	    erlang:demonitor(MonitorRef),	     
-	    exit(Pid, kill),
-	    NewUpdcont = lists:keydelete(Name, 1, UpdCont),
-	    {noreply, State#state{retry = [Name | RetryList],
-				  updating_content = NewUpdcont}};
-	 false ->
-	    exit(Pid, kill),
-	    io:format("Error: Received timeout for company name ~p that wasn't in the state ~p~n", 
+	{Name, MonitorRef, Pid} ->
+	    erlang:demonitor(MonitorRef),
+	    Pid ! finish_updating,	    
+	    NewUpdCont = lists:keydelete(Name, 1, UpdCont),
+	    ok = send_start_for_next_batch(NewUpdCont),
+	    {noreply, State#state{updating_content=NewUpdCont}};
+	false ->
+	    Pid ! finish_updating,
+	    io:format("Error: Received no_update_needed for company name ~p that wasn't in the state ~p~n", 
 		      [Name, State]),
 	    {noreply, State}
-     end;
+    end;
 
 handle_info({updating_done, Name, Pid}, #state{updating_content=UpdCont}=State) ->
     case lists:keyfind(Name, 1, UpdCont) of
-	{Name, MonitorRef, TimerRef, _Pid} ->
+	{Name, MonitorRef, _Pid} ->
 	    erlang:demonitor(MonitorRef),
-	    erlang:cancel_timer(TimerRef),
 	    Pid ! finish_updating,
 	    NewUpdCont = lists:keydelete(Name, 1, UpdCont),
+	    ok = send_start_for_next_batch(NewUpdCont),
 	    {noreply, State#state{updating_content=NewUpdCont}};
 	false ->
 	    Pid ! finish_updating,
@@ -191,21 +215,17 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-update_from_database() ->    
-    Qh = db_handler:get_query_handle(company),
-    Q = qlc:q([Company || Company <- Qh]),
-    Companies = db_handler:q(Q),
+update_from_database(Companies) ->      
     UpdatingCompanies = 
 	lists:map(
 	  fun(#company{name=Name, instrument=Instrument}) ->
 		  Pid = spawn(?MODULE, updating_content, [self(), Name, Instrument]),
-		  MonitorRef = erlang:monitor(process, Pid),
-		  TimerRef = erlang:start_timer(?UPDATE_TIMEOUT, self(), {update_timeout, {Name, Pid}}),
-		  {Name, MonitorRef, TimerRef, Pid}
+		  MonitorRef = erlang:monitor(process, Pid),		  
+		  {Name, MonitorRef, Pid}
 	  end, Companies),
     erlang:start_timer(300000, self(), retry_timer_timeout),
+    ok = send_start_for_next_batch(UpdatingCompanies),
     UpdatingCompanies.
-
 
 updating_content(Pid, Name, Instrument) ->
     Today = date_lib:today(),
@@ -224,16 +244,29 @@ updating_content(Pid, Name, Instrument) ->
 	end,
     LatestDatePlusOne = calendar:date_to_gregorian_days(LatestDate) + 1,
     Latest = calendar:gregorian_days_to_date(LatestDatePlusOne),
+    
     case date_lib:is_greater(Today, Latest) of
 	true ->
+	    receive
+		start_updating ->
+		    ok
+	    end,
 	    ok = omx_db_pop:save_instrument(Instrument, Name, Latest, Today),
 	    Pid ! {updating_done, Name, self()};
 	false ->
-	    Pid ! {updating_done, Name, self()}
+	    Pid ! {no_update_needed, Name, self()}
     end,
-
     receive
 	finish_updating ->
+	    ok
+    end.
+
+send_start_for_next_batch(Companies) ->
+    try hd(Companies) of
+	{_,_,Pid} ->
+	    Pid ! start_updating,
+	    ok
+    catch _:_ ->
 	    ok
     end.
 	

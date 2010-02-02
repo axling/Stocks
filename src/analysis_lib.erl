@@ -23,9 +23,7 @@
 analyse_trends(CompanyList, TrendDays) ->
     Today = date_lib:today(),
     FromDate = date_lib:date_minus_days(Today, TrendDays),
-    io:format("Companies to analyse ~p~n", [CompanyList]),
     ModdedFromDate = date_lib:date_minus_days(Today, TrendDays+30),    
-    io:format("FromDate: ~p~nModdedFromdate: ~p~n", [FromDate, ModdedFromDate]),
     lists:map(
       fun(#company{name=Name}) ->
 	      Qh = db_handler:get_query_handle(stocks),

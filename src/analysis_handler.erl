@@ -12,7 +12,7 @@
 -include_lib("stdlib/include/qlc.hrl").
 
 %% API
--export([start_link/0, analyse/0]).
+-export([start_link/0, analyse/0, analyse/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -24,7 +24,10 @@
 %% API
 %%====================================================================
 analyse() ->
-    gen_server:call(?MODULE, start_analysis, infinity).
+    analyse([7,30]).
+
+analyse(DaysList) ->
+    gen_server:cast(?MODULE, {start_analysis, DaysList}).
 %%--------------------------------------------------------------------
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the server
@@ -44,7 +47,6 @@ start_link() ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    start_analysis(),
     Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {1,1,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
     {ok, #state{}}.
@@ -57,8 +59,7 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(start_analysis, _From, State) ->
-    ok = start_analysis(),
+handle_call(_, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
 
@@ -68,6 +69,9 @@ handle_call(start_analysis, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
+handle_cast({start_analysis, DaysList}, State) ->
+    ok = start_trend_analysis(DaysList),
+    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -78,7 +82,7 @@ handle_cast(_Msg, State) ->
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
 handle_info({timeout,_, daily_update}, State) ->
-    ok = start_analysis(),
+    ok = start_trend_analysis([7, 30, 60]),
     Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {1,1,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
     {noreply, State}.
@@ -103,21 +107,24 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-start_analysis() ->
+start_trend_analysis(DaysList) ->
     Qh = db_handler:get_query_handle(company),
     Query = qlc:q([Company || Company <- Qh]),
-    Companies = db_handler:q(Query),
-    WeekResults = analysis_lib:analyse_trends(Companies, 7),
-    MonthResults = analysis_lib:analyse_trends(Companies, 30),
-    %%YearResults = analysis_lib:analyse_trends(Companies, 365),
-    %%FiveYearResults = analysis_lib:analyse_trends(Companies, 365*5),    
-    {atomic, ok} = mnesia:transaction(
-      fun() ->
-	      lists:foreach(
-		fun(Entry) ->
-			mnesia:write(Entry)
-		end, 
-		lists:append([WeekResults, MonthResults]))
-      end),
+    Companies = db_handler:q(Query),    
+    DbUpdateList = 
+	lists:append(
+	  lists:map(
+	    fun(Days) ->
+		    analysis_lib:analyse_trends(Companies, Days)
+	    end, DaysList)),
+    {atomic, ok} = 
+	mnesia:transaction(
+	  fun() ->
+		  lists:foreach(
+		    fun(Entry) ->
+			    ok = mnesia:write(Entry)
+		    end, 
+		    DbUpdateList)
+	  end),
     ok.
     
