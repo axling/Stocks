@@ -39,36 +39,51 @@ out(A) ->
 			  end, db_handler:q(Query)),
     FiveWorst = lists:reverse(lists:sublist(Analysis, 5)),
     FiveBest = lists:reverse(lists:nthtail(length(Analysis)-5, Analysis)),
-    AnalysisTable =
-	[[{tr, [], 
-	   [{th, [], ["Stock"]},
-	    {th, [], ["7 Days"]},
-	    {th, [], ["30 Days"]},
-	    {th, [], ["60 Days"]},
-	    {th, [], ["365 Days"]}]}] ++
-	 lists:map(
-	   fun(#analysis{company=Name}) ->
-		   Q = qlc:q([A1 || A1 <- QhAnalysis, 
-				    A1#analysis.date == LastWorkDay,
-				    A1#analysis.company == Name]),
-		   Q2 = qlc:q([C#company.instrument || C <- QhCompany,
-				    C#company.name == Name]),
-		   [Instrument] = db_handler:q(Q2),
-		   StocksAnalysis = lists:sort(fun(#analysis{result=#trend_result{days=Days1}},
-						   #analysis{result=#trend_result{days=Days2}}) ->
-						       Days1 < Days2
-					       end, db_handler:q(Q)),
-		   {tr, [],
-		    [[{td, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], [Name]}]}] ++
-		     lists:map(
-		       fun(OneAnalysis) ->
-			       {td, [], [io_lib:format("~.2f%", 
-						       [(OneAnalysis#analysis.result)#trend_result.trend * 100])]}
-		       end, StocksAnalysis)]}
-	   end, lists:append([FiveBest, FiveWorst]))],
+    FiveBestRows = lists:map(fun map_analysis/1, FiveBest),
+    FiveWorstRows = lists:map(fun map_analysis/1, FiveWorst),
 
     {ehtml, [{table, [{class, "stock_table"}], 
-	      AnalysisTable}]}.
+	      [{tr, [], [{td, [{colspan, 5}], ["Five Best"]}]},
+	       {tr, [], 
+		[{th, [], ["Stock"]},
+		 {th, [], ["7 Days"]},
+		 {th, [], ["30 Days"]},
+		 {th, [], ["60 Days"]},
+		 {th, [], ["365 Days"]}]}] ++
+	      FiveBestRows ++
+	      [{tr, [], [{td, [{colspan, 5}], []}]},
+	       {tr, [], [{td, [{colspan, 5}], ["Five Worst"]}]},
+	       {tr, [], 
+		[{th, [], ["Stock"]},
+		 {th, [], ["7 Days"]},
+		 {th, [], ["30 Days"]},
+		 {th, [], ["60 Days"]},
+		 {th, [], ["365 Days"]}]}] ++
+	      FiveWorstRows
+	     }]}.
+
+map_analysis(#analysis{company=Name}) ->
+    QhAnalysis = db_handler:get_query_handle(analysis),
+    QhCompany = db_handler:get_query_handle(company),
+    LastWorkDay = date_lib:last_workday(),
+    Q = qlc:q([A1 || A1 <- QhAnalysis, 
+		     A1#analysis.date == LastWorkDay,
+		     A1#analysis.company == Name]),
+    Q2 = qlc:q([C#company.instrument || C <- QhCompany,
+					C#company.name == Name]),
+    [Instrument] = db_handler:q(Q2),
+    StocksAnalysis = lists:sort(fun(#analysis{result=#trend_result{days=Days1}},
+				    #analysis{result=#trend_result{days=Days2}}) ->
+					Days1 < Days2
+				end, db_handler:q(Q)),
+    {tr, [],
+     [[{td, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], [Name]}]}] ++
+      lists:map(
+	fun(OneAnalysis) ->
+		{td, [], [io_lib:format("~.2f%", 
+					[(OneAnalysis#analysis.result)#trend_result.trend * 100])]}
+	end, StocksAnalysis)]}.
+
 	</erl>
         </div>
 <div id="rightcol" ></div>

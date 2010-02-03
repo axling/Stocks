@@ -82,7 +82,7 @@ handle_cast(_Msg, State) ->
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
 handle_info({timeout,_, daily_update}, State) ->
-    ok = start_trend_analysis([7, 30, 60]),
+    ok = start_trend_analysis([7, 30, 60, 365]),
     Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {1,1,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
     {noreply, State}.

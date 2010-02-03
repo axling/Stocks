@@ -28,8 +28,14 @@ out(A) ->
 -include("include/mnesia_defs.hrl").
 -include_lib("stdlib/include/qlc.hrl").
 out(A) ->
-    case queryvar(A, "name") of
-	{ok, Instrument} ->
+    QueryList = yaws_api:parse_query(A),
+    io:format("~p", [A#arg.querydata]),
+    case proplists:get_value("name", QueryList) of
+	Instrument when not is_atom(Instrument) ->
+	    Days = list_to_integer(proplists:get_value("days", QueryList, "30")),
+	    Paginate = list_to_integer(proplists:get_value("paginate", QueryList, "15")),
+	    PaginateNr = list_to_integer(proplists:get_value("paginate_nr", QueryList, "0")),
+	    PageStart = if PaginateNr =< 0 -> 1; true -> PaginateNr*Paginate end,
 	    QhCompany = db_handler:get_query_handle(company),
 	    [Company] = db_handler:q(qlc:q([C#company.name || C <- QhCompany, 
 							      C#company.instrument==Instrument])),
@@ -42,22 +48,65 @@ out(A) ->
 		       fun({A, _}, {B, _}) ->
 			       date_lib:is_greater(B, A)
 		       end, db_handler:q(StockQuery)),
-	    MonthStocks = lists:nthtail(length(Stocks)-20, Stocks),
-	    StdErrMonth = std_err([S1 || {_,S1} <- MonthStocks]),
+	    TempStocks = lists:nthtail(length(Stocks)-Days, Stocks),
+	    StdErrMonth = std_err([S1 || {_,S1} <- TempStocks]),
 	    StdErrAll = std_err([S2 || {_,S2} <- Stocks]),
-	    ChartString = build_chart_string(Company, Stocks, 20, 400, 200),
+	    AvgPriceTemp = lists:sum([S1 || {_,S1} <- TempStocks])/length(TempStocks),
+	    AvgPrice = lists:sum([S1 || {_,S1} <- Stocks])/length(Stocks),
+	    MaxValueTemp = lists:max([Val || {_, Val} <- TempStocks]),
+	    MaxValue = lists:max([Val || {_, Val} <- Stocks]),
+	    MinValueTemp = lists:min([Val || {_, Val} <- TempStocks]),
+	    MinValue = lists:min([Val || {_, Val} <- Stocks]),
+	    ChartString = chart_builder:build_chart(Company, Stocks, Days, 400, 200),
 	    %% Remove all values from stocks that are older than 30 days
 	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
-		     {p, [], [io_lib:format("Standard error for 20 days: ~.2f%", [StdErrMonth*100])]},
-		     {p, [], [io_lib:format("Standard error for all: ~.2f%", [StdErrAll*100])]},
+		     {table, [], 
+		      [{tr, [], 
+			[{th, [], []}, {th, [], [integer_to_list(Days) ++ " days"]}, {th, [], ["All Time"]}]},
+		       {tr, [], 
+			[{td, [], ["Variation Coefficient"]}, 
+			 {td, [], [f("~.2f%", [StdErrMonth*100])]},
+			 {td, [], [f("~.2f%", [StdErrAll*100])]}]},
+		       {tr, [], 
+			[{td, [], ["Average Price"]}, 
+			 {td, [], [f("~.2f", [AvgPriceTemp])]},
+			 {td, [], [f("~.2f", [AvgPrice])]}]},
+		       {tr, [], 
+			[{td, [], ["Max Value"]}, 
+			 {td, [], [f("~.2f", [MaxValueTemp])]},
+			 {td, [], [f("~.2f", [MaxValue])]}]},
+		       {tr, [], 
+			[{td, [], ["Min Value"]}, 
+			 {td, [], [f("~.2f", [MinValueTemp])]},
+			 {td, [], [f("~.2f", [MinValue])]}]}]},		     
 		     {table, [{class, "stock_table"}], 
-		      [{tr, [], [{th, [{colspan, 2}], [Company ++ " values"]}]},
+		      [{tr, [], [{th, [{colspan, 2}], [Company ++ ", " ++  
+						       integer_to_list(Days) ++ " days"]}]},
 		       {tr, [], [{td, [{class, "width"}], "Date"}, {td, [{class, "adjacent"}], "Value"}]}] ++ 
 		      lists:map(
 			fun({Date, Value}) ->
 				{tr, [], [{td, [], [date_lib:convert_date_e_s(Date)]},
-					  {td, [{class, "adjacent"}], io_lib:format("~p", [Value])}]}
-			end, lists:reverse(MonthStocks))}]};	
+					  {td, [{class, "adjacent"}], f("~p", [Value])}]}
+			end, lists:sublist(lists:reverse(TempStocks), PageStart,Paginate)) ++ 
+		     [{tr, [], 
+		       [{td, [{colspan, 2}], 
+			 [{a, [{href, lists:concat(["stock.yaws?", 
+						    lists:map(
+						     fun({Key, Val}) ->
+							    lists:concat([Key, "=", Val])
+						     end, lists:keystore("paginate_nr", 1,
+									 QueryList, 
+									 {"paginate_nr", "0"}))])}], ["<"]},
+			  {a, [{href, lists:concat(["stock.yaws?", 
+						    lists:map(
+						     fun({Key, Val}) ->
+							    lists:concat([Key, "=", Val])
+						     end, lists:keystore("paginate_nr",
+									 1,
+									 QueryList, 
+									 {"paginate_nr", integer_to_list(PaginateNr+1)}))])}], [">"]}
+			 ]}]}]
+		     }]};	       	
 	undefined ->
 	    Qh = db_handler:get_query_handle(company),
 	    Query = qlc:q([Company || Company <- Qh]),
@@ -70,54 +119,9 @@ out(A) ->
 				end, Companies)}]}
     end.
 
-build_chart_string(Title, FullDataSet, Days, XSize, YSize) ->
-    PeriodSet = lists:nthtail(length(FullDataSet)-Days, FullDataSet),
-    {DateSet, DataSet} = lists:unzip(PeriodSet),
-    StrippedDataSet =
-	if 
-	    length(DataSet) > XSize ->
-		strip_data(DataSet, XSize);
-	    true ->
-		DataSet
-	end,
-    Max = lists:max(StrippedDataSet),
-    Min = lists:min(StrippedDataSet),
-    Interval = round(Max-Min/4),
-    FilteredDateSet = strip_data(DateSet, 6),
-    "http://chart.apis.google.com/chart?chtx=y&amp;chtr=0," ++ integer_to_list(round(Min)) 
-	++ "," ++ integer_to_list(round(Max)) ++
-	"|&amp;chtt=" ++ Title ++ ":+last+" ++ integer_to_list(Days) ++ "+days" ++ "&amp;chs=" ++ 
-	integer_to_list(XSize) ++ "x" ++ integer_to_list(YSize) ++ "&amp;cht=lc&amp;" ++ "chd=t:"
-	++ append_data(StrippedDataSet) ++ "&amp;chds=" ++ 
-	integer_to_list(trunc(Min)) ++ "," ++ integer_to_list(trunc(Max) + 1).
+
 	
-append_data([Data]) ->
-    case is_float(Data) of
-	true ->
-	    [Float] = io_lib:format("~.1f", [Data]),
-	    Float;
-	false ->
-	    integer_to_list(Data)
-    end;
-append_data([Data | DataSet]) ->
-    case is_float(Data) of
-	true ->
-	    [Float] = io_lib:format("~.1f", [Data]),
-	    Float ++ "," ++ append_data(DataSet);
-	false ->
-	    integer_to_list(Data) ++ "," ++ append_data(DataSet)
-    end.
-    
-strip_data(DataSet, Max) when Max < length(DataSet) ->
-    Steps = trunc(length(DataSet)/Max),
-    {_, Result, _} = 
-	lists:foldr(
-	  fun(Value, {1, AccList, Max}) ->
-		  {Max, [Value |AccList], Max};
-	     (Value, {Step, AccList, Max}) ->
-		  {Step-1, AccList, Max}
-	  end, {Steps, [], Steps}, DataSet),
-    Result.
+
 
 std_err(DataSet) ->
     Avg = lists:sum(DataSet)/length(DataSet),

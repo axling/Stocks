@@ -1,6 +1,8 @@
 table {
     font: 11px/24px Verdana, Arial, Helvetica, sans-serif;
-    border-collapse: collapse;
+    border-collapse: collapse;    
+}
+.stock_table {
     width: 170px;
 }
 th {
