@@ -25,3 +25,6 @@ td.adjacent {
     border-left: 1px solid #CCC;
     text-align: center;
 }
+.paginate_links {
+    text-align: center;
+}

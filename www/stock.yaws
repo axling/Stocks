@@ -29,26 +29,39 @@ out(A) ->
 -include_lib("stdlib/include/qlc.hrl").
 out(A) ->
     QueryList = yaws_api:parse_query(A),
-    io:format("~p", [A#arg.querydata]),
     case proplists:get_value("name", QueryList) of
 	Instrument when not is_atom(Instrument) ->
-	    Days = list_to_integer(proplists:get_value("days", QueryList, "30")),
-	    Paginate = list_to_integer(proplists:get_value("paginate", QueryList, "15")),
-	    PaginateNr = list_to_integer(proplists:get_value("paginate_nr", QueryList, "0")),
-	    PageStart = if PaginateNr =< 0 -> 1; true -> PaginateNr*Paginate end,
+	    PageSize = list_to_integer(proplists:get_value("page_size", QueryList, "15")),
+	    PageNr = list_to_integer(proplists:get_value("page", QueryList, "1")),
+	    
 	    QhCompany = db_handler:get_query_handle(company),
 	    [Company] = db_handler:q(qlc:q([C#company.name || C <- QhCompany, 
 							      C#company.instrument==Instrument])),
 	    %% Here I assume that we are running yaws from the root directory
 	    QhStocks = db_handler:get_query_handle(stocks),
 	    StockQuery = qlc:q([{Stock#stocks.date, Stock#stocks.closing} ||
-			      Stock <- QhStocks, 
-			      Stock#stocks.company == Company]),
+				   Stock <- QhStocks, 
+				   Stock#stocks.company == Company]),
+	    
 	    Stocks = lists:sort(
 		       fun({A, _}, {B, _}) ->
 			       date_lib:is_greater(B, A)
 		       end, db_handler:q(StockQuery)),
+	    QueryDays = list_to_integer(proplists:get_value("days", QueryList, "30")),
+	    Days = if
+		      QueryDays > length(Stocks) - 30 ->
+			   length(Stocks) -30;
+		       true ->
+			   QueryDays
+		   end,
+	    
+	    {PageStocks, PaginateLinks} = get_page_stocks(lists:reverse(Stocks), 
+							  PageSize, PageNr, QueryList),	    
 	    TempStocks = lists:nthtail(length(Stocks)-Days, Stocks),
+	    TempStocksMvgAvg1 = lists:nthtail(length(Stocks)-Days-10, Stocks),
+	    TempStocksMvgAvg2 = lists:nthtail(length(Stocks)-Days-30, Stocks),
+	    MvgAvg1 = calculate_moving_average([Val || {_, Val} <- TempStocksMvgAvg1], 10),
+	    MvgAvg2 = calculate_moving_average([Val || {_, Val} <- TempStocksMvgAvg2], 30),
 	    StdErrMonth = std_err([S1 || {_,S1} <- TempStocks]),
 	    StdErrAll = std_err([S2 || {_,S2} <- Stocks]),
 	    AvgPriceTemp = lists:sum([S1 || {_,S1} <- TempStocks])/length(TempStocks),
@@ -57,7 +70,13 @@ out(A) ->
 	    MaxValue = lists:max([Val || {_, Val} <- Stocks]),
 	    MinValueTemp = lists:min([Val || {_, Val} <- TempStocks]),
 	    MinValue = lists:min([Val || {_, Val} <- Stocks]),
-	    ChartString = chart_builder:build_chart(Company, Stocks, Days, 400, 200),
+	    ChartString = chart_builder:build_chart(
+			    Company, [{[Value || {_, Value} <- TempStocks], Company, {"000000", {1,2,0}}}, 
+				      {MvgAvg1, "10 Day Moving Average", {"0000FF", {3,6,6}}},
+				      {MvgAvg2, "30 Day Moving Average", {"AA2277", {3,15,12}}}],
+			    [Date || {Date, _} <- TempStocks],
+			    Days, 400, 220),
+	    
 	    %% Remove all values from stocks that are older than 30 days
 	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
 		     {table, [], 
@@ -80,32 +99,18 @@ out(A) ->
 			 {td, [], [f("~.2f", [MinValueTemp])]},
 			 {td, [], [f("~.2f", [MinValue])]}]}]},		     
 		     {table, [{class, "stock_table"}], 
-		      [{tr, [], [{th, [{colspan, 2}], [Company ++ ", " ++  
+		      [{tr, [], [{th, [{colspan, 2}], [yaws_api:htmlize(Company) ++ ", " ++  
 						       integer_to_list(Days) ++ " days"]}]},
 		       {tr, [], [{td, [{class, "width"}], "Date"}, {td, [{class, "adjacent"}], "Value"}]}] ++ 
 		      lists:map(
 			fun({Date, Value}) ->
 				{tr, [], [{td, [], [date_lib:convert_date_e_s(Date)]},
 					  {td, [{class, "adjacent"}], f("~p", [Value])}]}
-			end, lists:sublist(lists:reverse(TempStocks), PageStart,Paginate)) ++ 
+			end, PageStocks) ++ 
 		     [{tr, [], 
-		       [{td, [{colspan, 2}], 
-			 [{a, [{href, lists:concat(["stock.yaws?", 
-						    lists:map(
-						     fun({Key, Val}) ->
-							    lists:concat([Key, "=", Val])
-						     end, lists:keystore("paginate_nr", 1,
-									 QueryList, 
-									 {"paginate_nr", "0"}))])}], ["<"]},
-			  {a, [{href, lists:concat(["stock.yaws?", 
-						    lists:map(
-						     fun({Key, Val}) ->
-							    lists:concat([Key, "=", Val])
-						     end, lists:keystore("paginate_nr",
-									 1,
-									 QueryList, 
-									 {"paginate_nr", integer_to_list(PaginateNr+1)}))])}], [">"]}
-			 ]}]}]
+		       [{td, [{class, "paginate_links"},{colspan, 2}], 
+			 PaginateLinks
+			 }]}]
 		     }]};	       	
 	undefined ->
 	    Qh = db_handler:get_query_handle(company),
@@ -115,13 +120,74 @@ out(A) ->
 		     {ul, [], 
 		      lists:map(fun(#company{instrument=Instrument, name=Name}) ->
 					{li, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], 
-						   [Name]}]}
+						   [yaws_api:htmlize(Name)]}]}
 				end, Companies)}]}
     end.
 
 
-	
+calculate_moving_average(StockValues, Days) when Days < length(StockValues) -> 
+    calculate_moving_average(StockValues, 1, Days, []).
 
+calculate_moving_average(StockValues, Start, Days, AccValues) 
+  when (Start+Days-1) < length(StockValues) ->
+    MvgAvg = lists:sum(lists:sublist(StockValues, Start, Days))/Days,
+    calculate_moving_average(StockValues, Start+1, Days, [MvgAvg | AccValues]);
+calculate_moving_average(_StockValues, _Start, _Days, AccValues) ->
+    lists:reverse(AccValues).
+
+calculate_cumulative_average(Values, Start) ->
+    {List1, RestList} = lists:split(Start+1, Values),
+    CumSum = lists:sum(List1)/length(List1),
+    cum_avg(RestList, [CumSum], Start+1).
+
+cum_avg([], AccVal, _) ->
+    lists:reverse(AccVal);
+cum_avg([First | Rest], [CA | _Rest]=AccVal, I) ->
+    Sum = (First + CA*(I-1))/I,
+    cum_avg(Rest, [Sum | AccVal], I+1).
+
+get_page_stocks(Stocks, PageSize, PageNr, QueryList) ->
+    LastPage = trunc(length(Stocks)/PageSize),
+    if 
+	((PageNr =< 1) and (Stocks /= [])) ->
+	    PageStocks1 = lists:sublist(Stocks, PageSize),
+	    Html = 
+		[{a, [{href, make_page_link(2, QueryList)}], [">"]},
+		 "   ",
+		 {a, [{href, make_page_link(LastPage, QueryList)}], [">>"]}],
+	    {PageStocks1, Html};
+	
+	(((PageNr - 1) * PageSize) < length(Stocks)) ->
+	    PageStocks2 = lists:sublist(Stocks, ((PageNr-1)*PageSize), PageSize),
+	    Html = 
+		[{a, [{href, make_page_link(1, QueryList)}], ["<<"]},
+		 "   ",
+		 {a, [{href, make_page_link(PageNr-1, QueryList)}], ["<"]},
+		 "   ",
+		 {a, [{href, make_page_link(PageNr+1, QueryList)}], [">"]},		 
+		 "   ",
+		 {a, [{href, make_page_link(LastPage, QueryList)}], [">>"]}],
+	    {PageStocks2, Html};
+	true  ->
+	    PageStocks3 = lists:sublist(Stocks, ((LastPage-1)*PageSize), PageSize),
+	    Html = 
+		[{a, [{href, make_page_link(1, QueryList)}], ["<<"]},
+		 "   ",
+		 {a, [{href, make_page_link(PageNr-1, QueryList)}], ["<"]}],
+	    {PageStocks3, Html}
+    end.
+	    
+make_page_link(Page, QueryList) ->
+    NewQueryList = lists:keystore("page", 1, QueryList, {"page", integer_to_list(Page)}),
+    "stock.yaws?" ++ make_query_string(NewQueryList).
+					     
+make_query_string(QueryList) ->
+    string:join(
+      lists:map(
+	fun({Key, Val}) ->
+		lists:concat([Key, "=", Val])
+	end, QueryList),
+     "&amp;").
 
 std_err(DataSet) ->
     Avg = lists:sum(DataSet)/length(DataSet),

@@ -24,7 +24,7 @@
 %% API
 %%====================================================================
 analyse() ->
-    analyse([7,30]).
+    analyse([7,30, 60, 365]).
 
 analyse(DaysList) ->
     gen_server:cast(?MODULE, {start_analysis, DaysList}).
