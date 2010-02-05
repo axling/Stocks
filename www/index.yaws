@@ -27,12 +27,14 @@ out(A) ->
 -include("include/mnesia_defs.hrl").
 -include_lib("stdlib/include/qlc.hrl").
 out(A) ->
+    QueryList = yaws_api:parse_query(A),
+    TrendSort = list_to_integer(proplists:get_value("trend_sort", QueryList, "7")),
     QhAnalysis = db_handler:get_query_handle(analysis),
     QhCompany = db_handler:get_query_handle(company),
     LastWorkDay = date_lib:last_workday(),
     Query = qlc:q([A || A <- QhAnalysis, 
 			       A#analysis.date == LastWorkDay,
-			       ((A#analysis.result)#trend_result.days) == 7]),
+			       ((A#analysis.result)#trend_result.days) == TrendSort]),
     Analysis = lists:sort(fun(#analysis{result=#trend_result{trend=TrendA}},
 			      #analysis{result=#trend_result{trend=TrendB}}) ->
 				  TrendA < TrendB

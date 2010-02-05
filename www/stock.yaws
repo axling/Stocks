@@ -29,8 +29,10 @@ out(A) ->
 -include_lib("stdlib/include/qlc.hrl").
 out(A) ->
     QueryList = yaws_api:parse_query(A),
+    PostList = yaws_api:parse_post(A),
     case proplists:get_value("name", QueryList) of
 	Instrument when not is_atom(Instrument) ->
+	    
 	    PageSize = list_to_integer(proplists:get_value("page_size", QueryList, "15")),
 	    PageNr = list_to_integer(proplists:get_value("page", QueryList, "1")),
 	    
@@ -47,17 +49,18 @@ out(A) ->
 		       fun({A, _}, {B, _}) ->
 			       date_lib:is_greater(B, A)
 		       end, db_handler:q(StockQuery)),
-	    QueryDays = list_to_integer(proplists:get_value("days", QueryList, "30")),
+	    QueryDays = list_to_integer(proplists:get_value("days", PostList, "30")),
 	    Days = if
 		      QueryDays > length(Stocks) - 30 ->
-			   length(Stocks) -30;
+			   length(Stocks) - 30;
 		       true ->
 			   QueryDays
 		   end,
 	    
-	    {PageStocks, PaginateLinks} = get_page_stocks(lists:reverse(Stocks), 
-							  PageSize, PageNr, QueryList),	    
+	    
 	    TempStocks = lists:nthtail(length(Stocks)-Days, Stocks),
+	    {PageStocks, PaginateLinks} = get_page_stocks(lists:reverse(TempStocks), 
+							  PageSize, PageNr, QueryList),	    
 	    TempStocksMvgAvg1 = lists:nthtail(length(Stocks)-Days-10, Stocks),
 	    TempStocksMvgAvg2 = lists:nthtail(length(Stocks)-Days-30, Stocks),
 	    MvgAvg1 = calculate_moving_average([Val || {_, Val} <- TempStocksMvgAvg1], 10),
