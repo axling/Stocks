@@ -47,7 +47,7 @@ start_link() ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {1,1,0}}),
+    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,0,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
     {ok, #state{}}.
 %%--------------------------------------------------------------------
@@ -83,7 +83,7 @@ handle_cast(_Msg, State) ->
 %%--------------------------------------------------------------------
 handle_info({timeout,_, daily_update}, State) ->
     ok = start_trend_analysis([7, 30, 60, 365]),
-    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {1,1,0}}),
+    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,0,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
     {noreply, State}.
 

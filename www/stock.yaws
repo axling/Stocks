@@ -29,10 +29,10 @@ out(A) ->
 -include_lib("stdlib/include/qlc.hrl").
 out(A) ->
     QueryList = yaws_api:parse_query(A),
-    PostList = yaws_api:parse_post(A),
     case proplists:get_value("name", QueryList) of
 	Instrument when not is_atom(Instrument) ->
-	    
+	    PostList = yaws_api:parse_post(A),
+	   
 	    PageSize = list_to_integer(proplists:get_value("page_size", QueryList, "15")),
 	    PageNr = list_to_integer(proplists:get_value("page", QueryList, "1")),
 	    
@@ -82,6 +82,13 @@ out(A) ->
 	    
 	    %% Remove all values from stocks that are older than 30 days
 	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
+		     {p, [],
+		      [{form, [{name,"days_select"}, {method, "post"}, {action, "stock.yaws?" ++ A#arg.querydata}], 
+			 [{select, [{name,"days"}, {onchange, "document.days_select.submit()"}], 
+			   [{option, [{value, "30"}], ["30"]},
+			    {option, [{value, "60"}], ["60"]},
+			    {option, [{value, "365"}], ["1 Year"]},
+			    {option, [{value, integer_to_list(365*2)}], ["2 Years"]}]}]}]},
 		     {table, [], 
 		      [{tr, [], 
 			[{th, [], []}, {th, [], [integer_to_list(Days) ++ " days"]}, {th, [], ["All Time"]}]},

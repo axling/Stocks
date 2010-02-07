@@ -62,9 +62,8 @@ init([]) ->
     process_flag(trap_exit, true),
     ok = db_handler:ready(),
     ok = inets:start(),
-    http:set_options([{proxy, {{"www-proxy.ericsson.se", 8080}, ["localhost"]}}]),
     %%ibrowse:start(),
-    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,1,0}}),
+    Secs = date_lib:seconds_until_time({date_lib:today(), {21,30,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
     {ok, #state{}}.
 
@@ -131,7 +130,7 @@ handle_info({timeout, _, daily_update}, #state{updating_content=Comps}=State) ->
     Companies = db_handler:q(Q),
     UpdatingCompanies = update_from_database(Companies),
     ok = send_start_for_next_batch(UpdatingCompanies),
-    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,1,0}}),
+    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {21,30,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
     {noreply, State#state{updating_content=UpdatingCompanies, retry=[]}};
 
@@ -264,6 +263,7 @@ updating_content(Pid, Name, Instrument) ->
 send_start_for_next_batch(Companies) ->
     try hd(Companies) of
 	{_,_,Pid} ->
+	    timer:sleep(5000),
 	    Pid ! start_updating,
 	    ok
     catch _:_ ->

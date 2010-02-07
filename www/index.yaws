@@ -31,43 +31,57 @@ out(A) ->
     TrendSort = list_to_integer(proplists:get_value("trend_sort", QueryList, "7")),
     QhAnalysis = db_handler:get_query_handle(analysis),
     QhCompany = db_handler:get_query_handle(company),
-    LastWorkDay = date_lib:last_workday(),
-    Query = qlc:q([A || A <- QhAnalysis, 
-			       A#analysis.date == LastWorkDay,
-			       ((A#analysis.result)#trend_result.days) == TrendSort]),
-    Analysis = lists:sort(fun(#analysis{result=#trend_result{trend=TrendA}},
-			      #analysis{result=#trend_result{trend=TrendB}}) ->
-				  TrendA < TrendB
-			  end, db_handler:q(Query)),
-    FiveWorst = lists:reverse(lists:sublist(Analysis, 5)),
-    FiveBest = lists:reverse(lists:nthtail(length(Analysis)-5, Analysis)),
-    FiveBestRows = lists:map(fun map_analysis/1, FiveBest),
-    FiveWorstRows = lists:map(fun map_analysis/1, FiveWorst),
+    Q = qlc:q([Analysis#analysis.date || Analysis <- QhAnalysis]),
+    SortedDates = lists:sort(fun(A, B) ->
+				     date_lib:is_greater(B, A)
+			     end, db_handler:q(Q)),
+    case SortedDates of
+	[] ->
+	    {ehtml, [{p, [], ["No analysis available"]}]};
+	SortedDates ->
+	    LastWorkDay = hd(SortedDates),
+	    Query = qlc:q([A || A <- QhAnalysis, 
+				    A#analysis.date == LastWorkDay,
+				    ((A#analysis.result)#trend_result.days) == TrendSort]),
+	    Analysis = lists:sort(fun(#analysis{result=#trend_result{trend=TrendA}},
+				      #analysis{result=#trend_result{trend=TrendB}}) ->
+					  TrendA < TrendB
+				  end, db_handler:q(Query)),
+	    FiveWorst = lists:reverse(lists:sublist(Analysis, 5)),
+	    FiveBest = lists:reverse(lists:nthtail(length(Analysis)-5, Analysis)),
+	    FiveBestRows = lists:map(fun map_analysis/1, FiveBest),
+	    FiveWorstRows = lists:map(fun map_analysis/1, FiveWorst),
 
-    {ehtml, [{table, [{class, "stock_table"}], 
-	      [{tr, [], [{td, [{colspan, 5}], ["Five Best"]}]},
-	       {tr, [], 
-		[{th, [], ["Stock"]},
-		 {th, [], ["7 Days"]},
-		 {th, [], ["30 Days"]},
-		 {th, [], ["60 Days"]},
-		 {th, [], ["365 Days"]}]}] ++
-	      FiveBestRows ++
-	      [{tr, [], [{td, [{colspan, 5}], []}]},
-	       {tr, [], [{td, [{colspan, 5}], ["Five Worst"]}]},
-	       {tr, [], 
-		[{th, [], ["Stock"]},
-		 {th, [], ["7 Days"]},
-		 {th, [], ["30 Days"]},
-		 {th, [], ["60 Days"]},
-		 {th, [], ["365 Days"]}]}] ++
-	      FiveWorstRows
-	     }]}.
+	    {ehtml, [{table, [{class, "stock_table"}], 
+		      [{tr, [], [{td, [{colspan, 5}], ["Five Best"]}]},
+		       {tr, [], 
+			[{th, [], ["Stock"]},
+			 {th, [], ["7 Days"]},
+			 {th, [], ["30 Days"]},
+			 {th, [], ["60 Days"]},
+			 {th, [], ["365 Days"]}]}] ++
+		      FiveBestRows ++
+		      [{tr, [], [{td, [{colspan, 5}], []}]},
+		       {tr, [], [{td, [{colspan, 5}], ["Five Worst"]}]},
+		       {tr, [], 
+			[{th, [], ["Stock"]},
+			 {th, [], ["7 Days"]},
+			 {th, [], ["30 Days"]},
+			 {th, [], ["60 Days"]},
+			 {th, [], ["365 Days"]}]}] ++
+		      FiveWorstRows
+		     }]}
+    end.
 
 map_analysis(#analysis{company=Name}) ->
+    
     QhAnalysis = db_handler:get_query_handle(analysis),
+    Q3 = qlc:q([Analysis#analysis.date || Analysis <- QhAnalysis]),
+    SortedDates = lists:sort(fun(A, B) ->
+				     date_lib:is_greater(B, A)
+			     end, db_handler:q(Q3)),
+    LastWorkDay = hd(SortedDates),
     QhCompany = db_handler:get_query_handle(company),
-    LastWorkDay = date_lib:last_workday(),
     Q = qlc:q([A1 || A1 <- QhAnalysis, 
 		     A1#analysis.date == LastWorkDay,
 		     A1#analysis.company == Name]),
