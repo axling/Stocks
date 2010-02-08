@@ -1,6 +1,6 @@
 -record(stocks, {company, date, highest, lowest, closing, average, turnover, volume, completions}).
 
--record(company, {name, instrument}).
+-record(company, {name, instrument, market}).
 
 -record(analysis, {company, date, type, result}).
 
