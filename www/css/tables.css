@@ -3,7 +3,7 @@ table {
     border-collapse: collapse;    
 }
 .stock_table {
-    width: 170px;
+    width: 300px;
 }
 th {
     padding: 0 0.5em;

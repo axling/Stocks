@@ -41,13 +41,13 @@ out(A) ->
 							      C#company.instrument==Instrument])),
 	    %% Here I assume that we are running yaws from the root directory
 	    QhStocks = db_handler:get_query_handle(stocks),
-	    StockQuery = qlc:q([{Stock#stocks.date, Stock#stocks.closing} ||
+	    StockQuery = qlc:q([Stock ||
 				   Stock <- QhStocks, 
 				   Stock#stocks.company == Company]),
 	    
 	    Stocks = lists:sort(
-		       fun({A, _}, {B, _}) ->
-			       date_lib:is_greater(B, A)
+		       fun(StockA, StockB) ->
+			       date_lib:is_greater(StockB#stocks.date, StockA#stocks.date)
 		       end, db_handler:q(StockQuery)),
 	    QueryDays = list_to_integer(proplists:get_value("days", PostList, "30")),
 	    Days = if
@@ -55,33 +55,44 @@ out(A) ->
 			   length(Stocks) - 30;
 		       true ->
 			   QueryDays
-		   end,
-	    
+		   end,	    
 	    
 	    TempStocks = lists:nthtail(length(Stocks)-Days, Stocks),
 	    {PageStocks, PaginateLinks} = get_page_stocks(lists:reverse(TempStocks), 
 							  PageSize, PageNr, QueryList),	    
 	    TempStocksMvgAvg1 = lists:nthtail(length(Stocks)-Days-10, Stocks),
 	    TempStocksMvgAvg2 = lists:nthtail(length(Stocks)-Days-30, Stocks),
-	    MvgAvg1 = calculate_moving_average([Val || {_, Val} <- TempStocksMvgAvg1], 10),
-	    MvgAvg2 = calculate_moving_average([Val || {_, Val} <- TempStocksMvgAvg2], 30),
-	    StdErrMonth = std_err([S1 || {_,S1} <- TempStocks]),
-	    StdErrAll = std_err([S2 || {_,S2} <- Stocks]),
-	    AvgPriceTemp = lists:sum([S1 || {_,S1} <- TempStocks])/length(TempStocks),
-	    AvgPrice = lists:sum([S1 || {_,S1} <- Stocks])/length(Stocks),
-	    MaxValueTemp = lists:max([Val || {_, Val} <- TempStocks]),
-	    MaxValue = lists:max([Val || {_, Val} <- Stocks]),
-	    MinValueTemp = lists:min([Val || {_, Val} <- TempStocks]),
-	    MinValue = lists:min([Val || {_, Val} <- Stocks]),
+	    MvgAvg1 = data_lib:mvg_avg([S#stocks.closing || S <- TempStocksMvgAvg1], 10),
+	    MvgAvg2 = data_lib:mvg_avg([S#stocks.closing || S <- TempStocksMvgAvg2], 30),
+	    Ema10 = data_lib:ema([S#stocks.closing || S <- TempStocksMvgAvg1], 10),
+	    StdErrMonth = data_lib:std_err([S#stocks.closing || S <- TempStocks]),
+	    StdErrAll = data_lib:std_err([S#stocks.closing || S <- Stocks]),
+	    AvgPriceTemp = lists:sum([S#stocks.closing || S <- TempStocks])/length(TempStocks),
+	    AvgPrice = lists:sum([S#stocks.closing || S <- Stocks])/length(Stocks),
+	    MaxValueTemp = lists:max([S#stocks.closing || S <- TempStocks]),
+	    MaxValue = lists:max([S#stocks.closing || S <- Stocks]),
+	    MinValueTemp = lists:min([S#stocks.closing || S <- TempStocks]),
+	    MinValue = lists:min([S#stocks.closing || S <- Stocks]),
+	    Ema12 = data_lib:ema([S#stocks.closing || S <- lists:nthtail(length(Stocks)-Days-12, Stocks)], 12),
+	    Ema26 = data_lib:ema([S#stocks.closing || S <- lists:nthtail(length(Stocks)-Days-26, Stocks)], 26),
+	    Macd = [E12 - E26 || {E12, E26} <- lists:zip(Ema12, Ema26)],
+	    Signal = data_lib:ema(Macd, 9),
+	    io:format("MACD: ~p, Signal: ~p~n", [length(Macd), length(Signal)]),
+	    MacdChart = chart_builder:build_chart(
+			  Company, [{Macd, "MACD", {"0000FF", {3,6,6}}}],
+			  [S#stocks.date || S <- TempStocks],
+			  Days, 400, 220),
 	    ChartString = chart_builder:build_chart(
-			    Company, [{[Value || {_, Value} <- TempStocks], Company, {"000000", {1,2,0}}}, 
+			    Company, [{[S#stocks.closing || S <- TempStocks], Company, {"000000", {1,2,0}}}, 
 				      {MvgAvg1, "10 Day Moving Average", {"0000FF", {3,6,6}}},
-				      {MvgAvg2, "30 Day Moving Average", {"AA2277", {3,15,12}}}],
-			    [Date || {Date, _} <- TempStocks],
+				      {MvgAvg2, "30 Day Moving Average", {"AA2277", {3,15,12}}},
+				      {Ema10, "10 Day Exponential Average", {"CCCC00", {4,20,20}}}],
+			    [S#stocks.date || S <- TempStocks],
 			    Days, 400, 220),
 	    
 	    %% Remove all values from stocks that are older than 30 days
 	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
+		     {img, [{src, MacdChart}, {alt, "MACD-Chart"}]},
 		     {p, [],
 		      [{form, [{name,"days_select"}, {method, "post"}, {action, "stock.yaws?" ++ A#arg.querydata}], 
 			 [{select, [{name,"days"}, {onchange, "document.days_select.submit()"}], 
@@ -109,13 +120,24 @@ out(A) ->
 			 {td, [], [f("~.2f", [MinValueTemp])]},
 			 {td, [], [f("~.2f", [MinValue])]}]}]},		     
 		     {table, [{class, "stock_table"}], 
-		      [{tr, [], [{th, [{colspan, 2}], [yaws_api:htmlize(Company) ++ ", " ++  
+		      [{tr, [], [{th, [{colspan, 8}], [yaws_api:htmlize(Company) ++ ", " ++  
 						       integer_to_list(Days) ++ " days"]}]},
-		       {tr, [], [{td, [{class, "width"}], "Date"}, {td, [{class, "adjacent"}], "Value"}]}] ++ 
+		       {tr, [], [{td, [{class, "width"}], "Date"}, {td, [{class, "adjacent"}], "Closing"},
+				 {td, [{class, "adjacent"}], "Highest"}, {td, [{class, "adjacent"}], "Lowest"},
+				 {td, [{class, "adjacent"}], "Average"}, {td, [{class, "adjacent"}], "Turnover"},
+				 {td, [{class, "adjacent"}], "Volume"},
+				 {td, [{class, "adjacent"}], "Completions"}]}] 
+		      ++ 
 		      lists:map(
-			fun({Date, Value}) ->
-				{tr, [], [{td, [], [date_lib:convert_date_e_s(Date)]},
-					  {td, [{class, "adjacent"}], f("~p", [Value])}]}
+			fun(Stock) ->
+				{tr, [], [{td, [], [date_lib:convert_date_e_s(Stock#stocks.date)]},
+					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.closing])},
+					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.highest])},
+					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.lowest])},
+					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.average])},
+					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.turnover])},
+					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.volume])},
+					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.completions])}]}
 			end, PageStocks) ++ 
 		     [{tr, [], 
 		       [{td, [{class, "paginate_links"},{colspan, 2}], 
@@ -198,16 +220,6 @@ make_query_string(QueryList) ->
 		lists:concat([Key, "=", Val])
 	end, QueryList),
      "&amp;").
-
-std_err(DataSet) ->
-    Avg = lists:sum(DataSet)/length(DataSet),
-    SqrSum = 
-	lists:sum(
-	  lists:map(
-	    fun(Val) ->
-		    math:pow(Avg - Val, 2)
-	    end, DataSet)),
-    math:sqrt(SqrSum/(length(DataSet) -1))/Avg.
 
 	</erl>
         </div>
