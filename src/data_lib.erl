@@ -5,7 +5,7 @@
 
 -module(data_lib).
 
--export([cum_avg/2, cum_avg/3, ema/2, mvg_avg/2, mvg_avg/4, std_err/1]).
+-export([cum_avg/2, cum_avg/3, ema/2, mvg_avg/2, mvg_avg/4, std_err/1, cci]).
 
 -include("mnesia_defs.hrl").
 
@@ -18,6 +18,14 @@ mvg_avg(ValueList, Start, Days, AccValues)
     mvg_avg(ValueList, Start+1, Days, [MvgAvg | AccValues]);
 mvg_avg(_ValueList, _Start, _Days, AccValues) ->
     lists:reverse(AccValues).
+
+stochastic(ValueList, Period) ->
+    LowestLow = lists:min([Low || {_Close, _High, Low} <- ValueList]),
+    HighestHigh = lists:max([Low || {_Close, High, _Low} <- ValueList]),
+    lists:map(
+     fun(Close) -> 
+	    100 * ((Close - LowestLow)/(HighestHigh - LowestLow))
+     end, [Close || {Close, _High, _Low} <- ValueList])
 
 ema(Values, Period) ->
     K = 2/(Period+1),
