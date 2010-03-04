@@ -5,7 +5,7 @@
 
 -module(data_lib).
 
--export([cum_avg/2, cum_avg/3, ema/2, mvg_avg/2, mvg_avg/4, std_err/1]).
+-export([cum_avg/2, cum_avg/3, ema/2, mvg_avg/2, mvg_avg/4, std_err/1, stochastic/2]).
 
 -include("mnesia_defs.hrl").
 
@@ -19,12 +19,18 @@ mvg_avg(ValueList, Start, Days, AccValues)
 mvg_avg(_ValueList, _Start, _Days, AccValues) ->
     lists:reverse(AccValues).
 
-%% stochastic(ValueList, Period) ->
-%%     stochastic(ValueList, Period, 14, []).
-				      
-%% stochastic(ValueList, Period, Start, AccValues) when length(Valuelist) > Start ->
-%%     {Close, _, _} = lists:nth(Start, ValueList),
-%%     lists:sublist(ValueList, Start - 13, 13),
+stochastic(ValueList, Period) ->
+    stochastic(ValueList, Period, Period, []).
+
+stochastic(ValueList, Period, Start, AccValues) when length(ValueList) >= Start ->
+    {Close, _, _} = lists:nth(Start, ValueList),
+    Frame = lists:sublist(ValueList, Start - (Period - 1), Period),
+    HighestHigh = lists:max([High || {_, High, _} <- Frame]),
+    LowestLow = lists:min([Low || {_, _, Low} <- Frame]),
+    AccVal = 100 * ((Close - LowestLow)/(HighestHigh-LowestLow)),
+    stochastic(ValueList, Period, Start + 1, [AccVal | AccValues]);
+stochastic(_, _, _, AccValues) ->
+    lists:reverse(AccValues).
     
 
 ema(Values, Period) ->

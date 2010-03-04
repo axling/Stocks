@@ -77,7 +77,18 @@ out(A) ->
 	    Ema26 = data_lib:ema([S#stocks.closing || S <- lists:nthtail(length(Stocks)-Days-26-7, Stocks)], 26),
 	    Macd = [E12 - E26 || {E12, E26} <- lists:zip(Ema12, Ema26)],
 	    Signal = data_lib:ema(Macd, 9),
-	    io:format("MACD: ~p, Signal: ~p~n", [length(Macd), length(Signal)]),
+
+	    Stoch14 = data_lib:stochastic([{S#stocks.closing, S#stocks.highest, S#stocks.lowest} 
+					   || S <- lists:nthtail(length(Stocks)-Days-14-3, Stocks)], 14),
+	    StochEma3 = data_lib:ema(Stoch14, 3),
+	    StochChart = chart_builder:build_chart(
+			   Company, [{lists:nthtail(length(Stoch14)-length(StochEma3), Stoch14), 
+				      "Stochastic Oscillator 14 days", {"000000", {3,2,0}}},
+				     {StochEma3, "Signal", {"112222", {3,4,5}}},
+				     {lists:duplicate(length(StochEma3), 20.0), "", {"FF0000", {4,0,0}}},
+				     {lists:duplicate(length(StochEma3), 80.0), "", {"FF0000", {4,0,0}}}],
+			   [S#stocks.date || S <- TempStocks],
+			   length(StochEma3), 400, 220),
 	    MacdChart = chart_builder:build_chart(
 			  Company, [{lists:nthtail(length(Macd) - length(Signal), Macd), "MACD", {"0000FF", {3,6,6}}},
 				    {Signal, "Signal", {"000000", {1,2,0}}},
@@ -95,6 +106,7 @@ out(A) ->
 	    %% Remove all values from stocks that are older than 30 days
 	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
 		     {img, [{src, MacdChart}, {alt, "MACD-Chart"}]},
+		     {img, [{src, StochChart}, {alt, "Stochastic Chart"}]},
 		     {p, [],
 		      [{form, [{name,"days_select"}, {method, "post"}, {action, "stock.yaws?" ++ A#arg.querydata}], 
 			 [{select, [{name,"days"}, {onchange, "document.days_select.submit()"}], 
