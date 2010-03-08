@@ -28,9 +28,14 @@ out(A) ->
 -include_lib("stdlib/include/qlc.hrl").
 out(A) ->
     QueryList = yaws_api:parse_query(A),
+    PostList = yaws_api:parse_post(A),
+
+    do_actions(PostList),
+    
     ContentState = content_handler:dump(),
+    UpdatingCompanies = element(3, ContentState),
     UpdatingState =
-	if length(element(3,ContentState)) > 0 ->
+	if length(UpdatingCompanies) > 0 ->
 		updating,
 		"System is updating";
 	   true ->
@@ -41,15 +46,95 @@ out(A) ->
 			content_handler:update_content(),
 			"System is updating";
 		   true ->
-			{a, [{href, "admin.yaws?" ++ 
-			      make_query_string(
-				lists:keystore("update", 1, QueryList,
-					       {"update", "true"}))}],
-			 ["Update Content"]}
+			{form, [], 
+			 [{input, [{name, "update_all_stock"}, {type, "submit"}, {value, "Update All Stocks"}]}]}
 		end
 	end,
     
-    {ehtml, [UpdatingState]}.
+    Qh = db_handler:get_query_handle(company),
+    Query = qlc:q([Company || Company <- Qh]),
+    Companies = lists:sort(db_handler:q(Query)),
+    CompanyRows = create_company_rows(Companies, UpdatingCompanies),
+    
+    {ehtml, [UpdatingState, 
+	     {br},
+	     {table, [],
+	      [{tr, [], 
+		[{th, [], ["Company Name"]},
+		 {th, [], ["Instrument Nr"]},
+		 {th, [], ["Market Type"]},
+		 {th, [], []},
+		 {th, [], []}]},
+	      {tr, [], 
+	       [{form, [{name, "add_company"}, {action,"admin.yaws"}, {method, "post"}],
+		 [{td, [], [{input, [{name, "add_name"}, {type, text}]}]},
+		  {td, [], [{input, [{name, "add_instrument"}, {type, text}]}]},
+		  {td, [], [{input, [{name, "add_market"}, {type, text}]}]},
+		  {td, [{colspan, "2"}], [{input, [{type, "submit"}, {value, "Add Company"}]}]}]}]}]
+	      ++ CompanyRows}]}.
+
+do_actions([]) ->
+    ok;
+do_actions([{update_all_stock, Value}]) ->
+    content_handler:update_content();
+do_actions([{Type, Value} | _Rest] = PostList) ->
+    case lists:nth(1, string:tokens(Type, "_")) /= "add" of
+	true ->
+	    [Instrument, ActionType] = string:tokens(Type, "_"),
+	    case ActionType of
+		"updatestock" ->
+		    Qh = db_handler:get_query_handle(company),
+		    Query = qlc:q([Company#company.name || Company <- Qh, 
+							   Company#company.instrument == 
+							       string:to_upper(Instrument)]),
+		    [CompanyName]= db_handler:q(Query),
+		    content_handler:update_content([CompanyName]);
+		Else -> 
+		    Qh = db_handler:get_query_handle(company),
+		    Query = qlc:q([Company || Company <- Qh, 
+					      Company#company.instrument == 
+						  string:to_upper(Instrument)]),
+		    [Company]= db_handler:q(Query),
+		    InstrumentVal = proplists:get_value("instrument", PostList),
+		    MarketVal = proplists:get_value("market", PostList),
+		    ok = db_handler:create_entry(Company#company{instrument=InstrumentVal,
+								 market=MarketVal})
+	    end;
+	false ->
+	    Name = proplists:get_value("add_name", PostList),
+	    Instrument = proplists:get_value("add_instrument", PostList),
+	    Market = proplists:get_value("add_market", PostList),
+	    ok = db_handler:create_entry(#company{name=Name, instrument=Instrument, market=Market})
+    end.
+
+create_company_rows(Companies, UpdatingCompanies) ->
+    lists:map(
+      fun(Company) ->
+	      Id = string:to_lower(Company#company.instrument), 
+	      UpdateAll =
+		  case lists:keyfind(Company#company.name, 1, UpdatingCompanies) of
+		      false ->
+			  {form, [{action, "admin.yaws"}, {name, Id ++ "update"},
+				  {method, "post"}], 
+			   [{input, [{name, Id ++ "_updatestock"}, {type, "submit"}, 
+				     {value, "Update Stock Quotes"}]}]};
+		      Else ->
+			  "Updating..."
+		  end,	      
+	      {tr, [], 
+	       [{td, [], [Company#company.name]},
+		{form, [{action, "admin.yaws"}, {name, Id ++ "_form"}, {method, "post"}], 
+		 [{td, [], 
+		   [{input, [{name, Id ++ "_instrument"}, {type, "text"}, 
+			     {value, Company#company.instrument}]}]},
+		  {td, [], 
+		   [{input, [{name, Id ++ "_market"}, {type, "text"}, 
+			     {value, Company#company.market}]}]},
+		  {td, [], 
+		   [{input, [{type, "submit"}, {value, "Update Company Info"}]}]}]},
+		{td, [], 
+		 [UpdateAll]}]}
+      end, Companies).
 
 make_query_string(QueryList) ->
     string:join(
