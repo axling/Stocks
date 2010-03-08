@@ -10,15 +10,16 @@
 -behaviour(gen_server).
 
 -include_lib("stdlib/include/qlc.hrl").
+-include("mnesia_defs.hrl").
 
 %% API
--export([start_link/0, analyse/0, analyse/1]).
+-export([start_link/0, analyse/0, analyse/1, analyse_company/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
--record(state, {}).
+-record(state, {companies_analysing}).
 
 %%====================================================================
 %% API
@@ -69,9 +70,9 @@ handle_call(_, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({start_analysis, DaysList}, State) ->
-    ok = start_trend_analysis(DaysList),
-    {noreply, State};
+handle_cast({start_analysis, DaysList}, #state{companies_analysing=Companies}=State) ->
+    AnalysingCompanies = start_trend_analysis(DaysList),
+    {noreply, State#state{companies_analysing=AnalysingCompanies ++ Companies}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -85,7 +86,40 @@ handle_info({timeout,_, daily_update}, State) ->
     ok = start_trend_analysis([7, 30, 60, 365]),
     Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,0,0}}),
     erlang:start_timer(Secs*1000, self(), daily_update),
-    {noreply, State}.
+    {noreply, State};
+
+handle_info({'DOWN', MonitorRef, process, Pid, _Reason}, 
+	    #state{companies_analysing=Companies}=State) ->
+    case lists:keyfind(MonitorRef, 2, Companies) of
+	{Name, MonitorRef, Pid} ->	    
+	    NewCompanies = lists:keydelete(Name, 1, Companies),
+	    {noreply, State#state{companies_analysing = NewCompanies}};
+	false ->
+	    io:format("Error: Received exit for company that wasn't in the state ~p~n", 
+		      [State]),
+	    {noreply, State}
+    end;
+handle_info({analysis_done, Pid, DbResults}, 
+	    #state{companies_analysing=Companies}=State) ->
+    case lists:keyfind(Pid, 3, Companies) of
+	{Name, MonitorRef, Pid} ->
+	    erlang:demonitor(MonitorRef),
+	    Pid ! finish_analysis,
+	    NewCompanies = lists:keydelete(Name, 1, Companies),
+	    {atomic, ok} = 
+		mnesia:transaction(
+		  fun() ->
+			  lists:foreach(
+			    fun(Entry) ->
+				    ok = mnesia:write(Entry)
+			    end, DbResults)
+		  end),
+	    {noreply, State#state{companies_analysing = NewCompanies}};
+	false ->
+	   io:format("Error: Received analysis_done for company that wasn't in the state ~p~n", 
+		      [State]),
+	    {noreply, State}
+    end.
 
 %%--------------------------------------------------------------------
 %% Function: terminate(Reason, State) -> void()
@@ -111,20 +145,23 @@ start_trend_analysis(DaysList) ->
     Qh = db_handler:get_query_handle(company),
     Query = qlc:q([Company || Company <- Qh]),
     Companies = db_handler:q(Query),    
-    DbUpdateList = 
+        
+    lists:map(
+      fun(#company{name=Name}) ->
+	      Pid = spawn(?MODULE, analyse_company, [self(), Name, DaysList]),
+	      MonitorRef = erlang:monitor(process, Pid),		  
+	      {Name, MonitorRef, Pid}
+      end, Companies).
+    
+analyse_company(Pid, Company, DaysList) ->
+    DbResults =
 	lists:append(
 	  lists:map(
 	    fun(Days) ->
-		    analysis_lib:analyse_trends(Companies, Days)
+		    analysis_lib:analyse_trends(Company, Days)
 	    end, DaysList)),
-    {atomic, ok} = 
-	mnesia:transaction(
-	  fun() ->
-		  lists:foreach(
-		    fun(Entry) ->
-			    ok = mnesia:write(Entry)
-		    end, 
-		    DbUpdateList)
-	  end),
-    ok.
+    Pid ! {analysis_done, self(), DbResults},
+    receive finish_analysis -> ok end.
+	     
+    
     

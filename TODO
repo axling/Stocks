@@ -1,0 +1,6 @@
+- Fix analysis_handler so that different types of analysis can be executed
+- Add more indicators to data_lib
+- Change db_handler so that it doesn't hang the whole YAWS system when started, put the wait_for_tables function in separate processes
+- Fix an admin interface for analysis and stock quotes
+- The start page should include the five most buyworthy stock and the five most sellable stock
+- A rank page should exist that expands on the notion from the start page and ranks all the stocks on how attractive they are
