@@ -13,22 +13,30 @@
 -include("mnesia_defs.hrl").
 
 %% API
--export([start_link/0, analyse/0, analyse/1, analyse_company/3]).
+-export([start_link/0, analyse/0, analyse/1, analyse/2, analyse_company/3, dump/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
--record(state, {companies_analysing}).
+-record(state, {companies_analysing=[]}).
 
 %%====================================================================
 %% API
 %%====================================================================
 analyse() ->
-    analyse([7,30, 60, 365]).
+    gen_server:cast(?MODULE, start_analysis).
 
-analyse(DaysList) ->
-    gen_server:cast(?MODULE, {start_analysis, DaysList}).
+analyse(Companies) when is_list(Companies) ->
+    analyse(Companies, all).
+
+analyse(Companies, Types) when is_list(Companies),
+			       is_list(Types); is_atom(Types) ->
+    gen_server:cast(?MODULE, {start_analysis, Companies, Types}).
+
+dump() ->
+    gen_server:call(?MODULE, dump).
+    
 %%--------------------------------------------------------------------
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the server
@@ -48,8 +56,6 @@ start_link() ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,0,0}}),
-    erlang:start_timer(Secs*1000, self(), daily_update),
     {ok, #state{}}.
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -60,6 +66,9 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
+handle_call(dump, _From, #state{companies_analysing=Companies}=State) ->
+    {reply, Companies, State};
+
 handle_call(_, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
@@ -70,9 +79,16 @@ handle_call(_, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({start_analysis, DaysList}, #state{companies_analysing=Companies}=State) ->
-    AnalysingCompanies = start_trend_analysis(DaysList),
-    {noreply, State#state{companies_analysing=AnalysingCompanies ++ Companies}};
+handle_cast(start_analysis, #state{companies_analysing=Companies}=State) ->
+    AllCompanies = get_all_companies(),
+    AnalysingCompanies = start_analysis(AllCompanies, all),
+    {noreply, State#state{companies_analysing=lists:usort(AnalysingCompanies 
+							  ++ Companies)}};
+handle_cast({start_analysis, Companies, Types}, 
+	    #state{companies_analysing=StateCompanies}=State) ->
+    AnalysingCompanies = start_analysis(Companies, Types),
+    {noreply, State#state{companies_analysing=lists:usort(AnalysingCompanies 
+							  ++ StateCompanies)}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -82,12 +98,6 @@ handle_cast(_Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info({timeout,_, daily_update}, State) ->
-    ok = start_trend_analysis([7, 30, 60, 365]),
-    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {0,0,0}}),
-    erlang:start_timer(Secs*1000, self(), daily_update),
-    {noreply, State};
-
 handle_info({'DOWN', MonitorRef, process, Pid, _Reason}, 
 	    #state{companies_analysing=Companies}=State) ->
     case lists:keyfind(MonitorRef, 2, Companies) of
@@ -141,27 +151,64 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-start_trend_analysis(DaysList) ->
+get_all_companies() ->
     Qh = db_handler:get_query_handle(company),
-    Query = qlc:q([Company || Company <- Qh]),
-    Companies = db_handler:q(Query),    
-        
+    Query = qlc:q([Company#company.name || Company <- Qh]),
+    db_handler:q(Query).
+
+start_analysis(Companies, Types) ->
     lists:map(
-      fun(#company{name=Name}) ->
-	      Pid = spawn(?MODULE, analyse_company, [self(), Name, DaysList]),
-	      MonitorRef = erlang:monitor(process, Pid),		  
+      fun(Name) ->
+	      Pid = spawn(?MODULE, analyse_company, [self(), Name, Types]),
+	      MonitorRef = erlang:monitor(process, Pid),  
 	      {Name, MonitorRef, Pid}
       end, Companies).
     
-analyse_company(Pid, Company, DaysList) ->
-    DbResults =
-	lists:append(
-	  lists:map(
-	    fun(Days) ->
-		    analysis_lib:analyse_trends(Company, Days)
-	    end, DaysList)),
+analyse_company(Pid, Company, Types) ->
+    Macd = 
+	case is_type_defined(macd, Types) of
+	    true ->
+		analysis_lib:analyse_macd(Company);
+	    false ->
+		[]
+	end,    
+    Atr = 
+	case is_type_defined(atr, Types) of
+	    true ->
+		analysis_lib:analyse_atr(Company);
+	    false ->
+		[]
+	end,
+    Adx = 
+	case is_type_defined(adx, Types) of
+	    true ->
+		analysis_lib:analyse_adx(Company);
+	    false ->
+		[]
+	end,
+    MvgAvg = 
+	case is_type_defined(mvg_avg, Types) of
+	    true ->
+		analysis_lib:analyse_mvg_avg(Company);
+	    false ->
+		[]
+	end,
+    ExpAvg = 
+	case is_type_defined(exp_avg, Types) of
+	    true ->
+		analysis_lib:analyse_exp_avg(Company);
+	    false ->
+		[]
+	end,
+    
+    DbResults = lists:flatten([Macd, Atr, Adx, MvgAvg, ExpAvg]),
     Pid ! {analysis_done, self(), DbResults},
     receive finish_analysis -> ok end.
+
+is_type_defined(_Type, all) ->
+    true;
+is_type_defined(Type, Types) ->
+    lists:member(Type, Types).
 	     
     
     

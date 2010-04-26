@@ -37,76 +37,91 @@ out(A) ->
 	    PageNr = list_to_integer(proplists:get_value("page", QueryList, "1")),
 	    
 	    QhCompany = db_handler:get_query_handle(company),
-	    [Company] = db_handler:q(qlc:q([C#company.name || C <- QhCompany, 
-							      C#company.instrument==Instrument])),
-	    %% Here I assume that we are running yaws from the root directory
+	    [Company] = db_handler:q(qlc:q([C#company.name 
+					    || C <- QhCompany, 
+					       C#company.instrument==Instrument])),
+	    
+	    Days = list_to_integer(proplists:get_value("days", PostList, "30")),
+	    FromDate = date_lib:date_minus_days(date_lib:today(), Days+1),
 	    QhStocks = db_handler:get_query_handle(stocks),
 	    StockQuery = qlc:q([Stock ||
 				   Stock <- QhStocks, 
-				   Stock#stocks.company == Company]),
-	    
+				   Stock#stocks.company == Company,
+				   date_lib:is_greater(Stock#stocks.date, FromDate)]),	    
 	    Stocks = lists:sort(
 		       fun(StockA, StockB) ->
 			       date_lib:is_greater(StockB#stocks.date, StockA#stocks.date)
 		       end, db_handler:q(StockQuery)),
-	    QueryDays = list_to_integer(proplists:get_value("days", PostList, "30")),
-	    Days = if
-		      QueryDays > length(Stocks) - 30 ->
-			   length(Stocks) - 30;
-		       true ->
-			   QueryDays
-		   end,	    
-	    
-	    TempStocks = lists:nthtail(length(Stocks)-Days, Stocks),
-	    {PageStocks, PaginateLinks} = get_page_stocks(lists:reverse(TempStocks), 
-							  PageSize, PageNr, QueryList),	    
-	    TempStocksMvgAvg1 = lists:nthtail(length(Stocks)-Days-10, Stocks),
-	    TempStocksMvgAvg2 = lists:nthtail(length(Stocks)-Days-30, Stocks),
-	    MvgAvg1 = data_lib:mvg_avg([S#stocks.closing || S <- TempStocksMvgAvg1], 10),
-	    MvgAvg2 = data_lib:mvg_avg([S#stocks.closing || S <- TempStocksMvgAvg2], 30),
-	    Ema10 = data_lib:ema([S#stocks.closing || S <- TempStocksMvgAvg1], 10),
-	    StdErrMonth = data_lib:std_err([S#stocks.closing || S <- TempStocks]),
-	    StdErrAll = data_lib:std_err([S#stocks.closing || S <- Stocks]),
-	    AvgPriceTemp = lists:sum([S#stocks.closing || S <- TempStocks])/length(TempStocks),
-	    AvgPrice = lists:sum([S#stocks.closing || S <- Stocks])/length(Stocks),
-	    MaxValueTemp = lists:max([S#stocks.closing || S <- TempStocks]),
-	    MaxValue = lists:max([S#stocks.closing || S <- Stocks]),
-	    MinValueTemp = lists:min([S#stocks.closing || S <- TempStocks]),
-	    MinValue = lists:min([S#stocks.closing || S <- Stocks]),
-	    Ema12 = data_lib:ema([S#stocks.closing || S <- lists:nthtail(length(Stocks)-Days-12-7, Stocks)], 12),
-	    Ema26 = data_lib:ema([S#stocks.closing || S <- lists:nthtail(length(Stocks)-Days-26-7, Stocks)], 26),
-	    Macd = [E12 - E26 || {E12, E26} <- lists:zip(Ema12, Ema26)],
-	    Signal = data_lib:ema(Macd, 9),
+	    {PageStocks, PaginateLinks} = get_page_stocks(lists:reverse(Stocks), 
+							  PageSize, PageNr, QueryList),
 
-	    Stoch14 = data_lib:stochastic([{S#stocks.closing, S#stocks.highest, S#stocks.lowest} 
-					   || S <- lists:nthtail(length(Stocks)-Days-14-3, Stocks)], 14),
-	    StochEma3 = data_lib:ema(Stoch14, 3),
-	    StochChart = chart_builder:build_chart(
-			   Company, [{lists:nthtail(length(Stoch14)-length(StochEma3), Stoch14), 
-				      "Stochastic Oscillator 14 days", {"000000", {3,2,0}}},
-				     {StochEma3, "Signal", {"112222", {3,4,5}}},
-				     {lists:duplicate(length(StochEma3), 20.0), "", {"FF0000", {4,0,0}}},
-				     {lists:duplicate(length(StochEma3), 80.0), "", {"FF0000", {4,0,0}}}],
-			   [S#stocks.date || S <- TempStocks],
-			   length(StochEma3), 400, 220),
+	    QhMvgAvg = db_handler:get_query_handle(mvg_avg),
+	    MvgAvgQuery = qlc:q([M ||
+				   M <- QhMvgAvg, 
+				   M#mvg_avg.company == Company,
+				   date_lib:is_greater(M#mvg_avg.date, FromDate)]),
+	    MvgAvg = lists:sort(
+		       fun(A, B) ->
+			       date_lib:is_greater(B#mvg_avg.date, A#mvg_avg.date)
+		       end, db_handler:q(MvgAvgQuery)),
+	    QhExpAvg = db_handler:get_query_handle(exp_avg),
+	    ExpAvgQuery = qlc:q([M ||
+				    M <- QhExpAvg, 
+				    M#exp_avg.company == Company,
+				    date_lib:is_greater(M#exp_avg.date, FromDate)]),
+	    ExpAvg = lists:sort(
+		       fun(A, B) ->
+			       date_lib:is_greater(B#exp_avg.date, A#exp_avg.date)
+		       end, db_handler:q(ExpAvgQuery)),
+	    QhMacd = db_handler:get_query_handle(macd),
+	    MacdQuery = qlc:q([M ||
+				  M <- QhMacd, 
+				  M#macd.company == Company,
+				  date_lib:is_greater(M#macd.date, FromDate)]),
+	    Macd = lists:sort(
+		     fun(A, B) ->
+			     date_lib:is_greater(B#macd.date, A#macd.date)
+		     end, db_handler:q(MacdQuery)),
+	    QhAdx = db_handler:get_query_handle(adx),
+	    AdxQuery = qlc:q([M ||
+				 M <- QhAdx, 
+				 M#adx.company == Company,
+				 date_lib:is_greater(M#adx.date, FromDate)]),
+	    Adx = lists:sort(
+		    fun(A, B) ->
+			    date_lib:is_greater(B#adx.date, A#adx.date)
+		    end, db_handler:q(AdxQuery)),
+	    
 	    MacdChart = chart_builder:build_chart(
-			  Company, [{lists:nthtail(length(Macd) - length(Signal), Macd), "MACD", {"0000FF", {3,6,6}}},
-				    {Signal, "Signal", {"000000", {1,2,0}}},
-				    {lists:duplicate(length(Signal), 0.0), "Zero Line", {"000011", {3,2,0}}}],
-			  [S#stocks.date || S <- TempStocks],
-			  length(Signal), 400, 220),
+			  Company, [{[M#macd.value || M <- Macd], "MACD", {"0000FF", {3,6,6}}},
+				    {[M#macd.signal || M <- Macd], "Signal", {"000000", {1,2,0}}},
+				    {lists:duplicate(length(Macd), 0.0), "Zero Line", {"000011", {3,2,0}}}],
+			  [M#macd.date || M <- Macd],
+			  length(Macd), 400, 170),
 	    ChartString = chart_builder:build_chart(
-			    Company, [{[S#stocks.closing || S <- TempStocks], Company, {"000000", {1,2,0}}}, 
-				      {MvgAvg1, "10 Day Moving Average", {"0000FF", {3,6,6}}},
-				      {MvgAvg2, "30 Day Moving Average", {"AA2277", {3,15,12}}},
-				      {Ema10, "10 Day Exponential Average", {"CCCC00", {4,20,20}}}],
-			    [S#stocks.date || S <- TempStocks],
-			    Days, 400, 220),
+  			    Company, [{[S#stocks.closing || S <- Stocks], Company, {"000000", {1,2,0}}}, 
+  				       {[M#mvg_avg.ten || M <- MvgAvg], "10 Day Moving Average", 
+ 					{"0000FF", {3,6,6}}},
+ 				      {[M#mvg_avg.thirty || M <- MvgAvg], "30 Day Moving Average", 
+   				       {"AA2277", {3,15,12}}},
+				      {[M#exp_avg.ten || M <- ExpAvg], "10 Day Exponential Average", 
+   				       {"CCCC00", {4,20,20}}},
+   				      {[M#exp_avg.thirty || M <- ExpAvg], "30 Day Exponential Average", 
+  				       {"006666", {3,10,10}}}],
+  			    [S#stocks.date || S <- Stocks],
+  			    length(Stocks), 400, 220),
+	   
+	    AdxChart = chart_builder:build_chart(
+ 			 Company, [{[M#adx.di_plus || M <- Adx], "Di+", {"000000", {1,2,0}}},
+ 				   {[M#adx.di_minus || M <- Adx], "Di-", {"00AAAA", {1,2,0}}},
+ 				   {[M#adx.value || M <- Adx], "ADX", {"FF00FF", {3, 4, 6}}}],
+  			 [M#adx.date || M <- Adx],
+  			 length(Adx), 400, 170),
 	    
 	    %% Remove all values from stocks that are older than 30 days
 	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
 		     {img, [{src, MacdChart}, {alt, "MACD-Chart"}]},
-		     {img, [{src, StochChart}, {alt, "Stochastic Chart"}]},
+		     {img, [{src, AdxChart}, {alt, "ADX Chart"}]},
 		     {p, [],
 		      [{form, [{name,"days_select"}, {method, "post"}, {action, "stock.yaws?" ++ A#arg.querydata}], 
 			 [{select, [{name,"days"}, {onchange, "document.days_select.submit()"}], 
@@ -114,25 +129,6 @@ out(A) ->
 			    {option, [{value, "60"}], ["60"]},
 			    {option, [{value, "365"}], ["1 Year"]},
 			    {option, [{value, integer_to_list(365*2)}], ["2 Years"]}]}]}]},
-		     {table, [], 
-		      [{tr, [], 
-			[{th, [], []}, {th, [], [integer_to_list(Days) ++ " days"]}, {th, [], ["All Time"]}]},
-		       {tr, [], 
-			[{td, [], ["Variation Coefficient"]}, 
-			 {td, [], [f("~.2f%", [StdErrMonth*100])]},
-			 {td, [], [f("~.2f%", [StdErrAll*100])]}]},
-		       {tr, [], 
-			[{td, [], ["Average Price"]}, 
-			 {td, [], [f("~.2f", [AvgPriceTemp])]},
-			 {td, [], [f("~.2f", [AvgPrice])]}]},
-		       {tr, [], 
-			[{td, [], ["Max Value"]}, 
-			 {td, [], [f("~.2f", [MaxValueTemp])]},
-			 {td, [], [f("~.2f", [MaxValue])]}]},
-		       {tr, [], 
-			[{td, [], ["Min Value"]}, 
-			 {td, [], [f("~.2f", [MinValueTemp])]},
-			 {td, [], [f("~.2f", [MinValue])]}]}]},		     
 		     {table, [{class, "stock_table"}], 
 		      [{tr, [], [{th, [{colspan, 8}], [yaws_api:htmlize(Company) ++ ", " ++  
 						       integer_to_list(Days) ++ " days"]}]},

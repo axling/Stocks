@@ -5,7 +5,8 @@
 
 -module(data_lib).
 
--export([cum_avg/2, cum_avg/3, ema/2, mvg_avg/2, mvg_avg/4, std_err/1, stochastic/2]).
+-export([cum_avg/2, cum_avg/3, ema/2, mvg_avg/2, mvg_avg/4, std_err/1, stochastic/2,
+	 di/2, adx/2, atr/2, macd/1]).
 
 -include("mnesia_defs.hrl").
 
@@ -32,7 +33,6 @@ stochastic(ValueList, Period, Start, AccValues) when length(ValueList) >= Start 
 stochastic(_, _, _, AccValues) ->
     lists:reverse(AccValues).
     
-
 ema(Values, Period) ->
     K = 2/(Period+1),
     ema(lists:nthtail(Period, Values), K, 
@@ -64,3 +64,52 @@ std_err(Values) ->
 		    math:pow(Avg - Val, 2)
 	    end, Values)),
     math:sqrt(SqrSum/(length(Values) -1))/Avg.
+
+di(ValueList, Period) when length(ValueList) > 1 ->
+    {Dm, _} = lists:mapfoldl(
+	   fun({High, Low, _Close}=A, {PHigh, PLow, _PClose}) ->
+		   DHigh = High - PHigh,
+		   DLow = Low - PLow,
+		   if (((DHigh < 0) and (DLow < 0)) or (DHigh == DLow)) ->
+			   {{0,0}, A};
+		      DHigh > DLow ->
+			   {{DHigh, 0}, A};
+		      true ->
+			   {{0, DLow}, A}
+		   end
+	   end, hd(ValueList), tl(ValueList)),
+    {DmPlus, DmMinus} = lists:unzip(Dm),
+    Atr = atr(ValueList, Period),
+    DiPlus = lists:map(fun({Ema, AtrVal}) ->
+			       (100 * Ema)/AtrVal
+		       end, lists:zip(ema(DmPlus, Period), Atr)),
+    DiMinus = lists:map(fun({Ema, AtrVal}) ->
+			       (100 * Ema)/AtrVal
+		       end, lists:zip(ema(DmMinus, Period), Atr)),
+    {DiPlus, DiMinus}.
+    
+adx(ValueList, Period) ->
+    {DiPlus, DiMinus} = di(ValueList, Period), 
+    
+    ema(lists:map(fun({DiPlusVal, DiMinusVal}) ->
+			  (100 * abs(DiPlusVal - DiMinusVal))/
+			      (DiPlusVal + DiMinusVal)
+		  end, lists:zip(DiPlus, DiMinus)), Period).
+
+atr(ValueList, Period) ->
+    {Tr, _ } = lists:mapfoldl(
+		  fun({High, Low, _Close}=A, {_PHigh, _PLow, PClose}) ->
+			  Max = lists:max([abs(High - Low),
+					   abs(High - PClose),
+					   abs(PClose - Low)]),
+			  {Max, A}
+		  end, hd(ValueList), tl(ValueList)),
+    ema(Tr, Period).
+
+macd(ValueList) ->
+    %% Valuelist is at least 36 long
+    Ema12 = data_lib:ema(lists:nthtail(14, ValueList), 12),
+    Ema26 = data_lib:ema(ValueList, 26),
+    Macd = [E12 - E26 || {E12, E26} <- lists:zip(Ema12, Ema26)],
+    Signal = data_lib:ema(Macd, 9),
+    {lists:nthtail(8, Macd), Signal}.

@@ -71,12 +71,27 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
     process_flag(trap_exit, true),
+    io:format("Starting mnesia.~n", []),
     case mnesia:start() of
 	ok ->
+	    io:format("Mnesia Started, create tables.~n", []),
 	    case create_tables([{stocks, bag, record_info(fields, stocks)}, 
 				{company, set, record_info(fields, company)},
-				{analysis, bag, record_info(fields, analysis)}]) of
+				{analysis, bag, record_info(fields, analysis)},
+				{mvg_avg, bag, record_info(fields, mvg_avg)},
+				{exp_avg, bag, record_info(fields, exp_avg)},
+				{adx, bag, record_info(fields, adx)},
+				{macd, bag, record_info(fields, macd)},
+				{atr, bag, record_info(fields, atr)}]) of
 		ok ->
+		    io:format("Tables created, create table indeces", []),
+		    {atomic, ok} = mnesia:add_table_index(stocks, date),
+		    {atomic, ok} = mnesia:add_table_index(mvg_vg, date),
+		    {atomic, ok} = mnesia:add_table_index(exp_avg, date),
+		    {atomic, ok} = mnesia:add_table_index(adx, date),
+		    {atomic, ok} = mnesia:add_table_index(macd, date),
+		    {atomic, ok} = mnesia:add_table_index(atr, date),
+		    io:format("Index created.~n", []),
 		    {ok, #state{}};
 		{error, Reason} ->
 		    {stop, Reason}
@@ -157,15 +172,19 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 create_table({TableName, Type, Fields}) ->
+    io:format("Create table ~p~n", [TableName]),
     case mnesia:create_table(TableName, [{type, Type},
 					 {disc_copies, [node()]},
 					 {attributes,
 					  Fields}]) of
 	{atomic, ok} ->
+	    io:format("Created table ~p~n", [TableName]),
 	    ok;
 	{aborted, {already_exists, TableName}} ->
-	    ok = mnesia:wait_for_tables([TableName], infinity);	    
+	    io:format("Table ~p already exists~n", [TableName]),
+	    ok;
 	{aborted, Reason} ->
+	    io:format("Create table ~p failed with ~p~n", [TableName, Reason]),
 	    {error, Reason}
     end.
 

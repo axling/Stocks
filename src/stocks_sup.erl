@@ -49,13 +49,11 @@ start_link() ->
 init([]) ->
     DbHandler = {db_handler,{db_handler,start_link,[]},
 		 permanent,2000,worker,[db_handler]},
-    TimeManager = {time_manager,{time_manager,start_link,[]},
-		   permanent,2000,worker,[time_manager]},
     ContentHandler = {content_handler,{content_handler,start_link,[]},
 		      permanent,2000,worker,[content_handler]},
     AnalysisHandler = {analysis_handler,{analysis_handler,start_link,[]},
 		      permanent,2000,worker,[analysis_handler]},
-    {ok,{{one_for_all,0,1}, [DbHandler, ContentHandler, AnalysisHandler, TimeManager]}}.
+    {ok,{{one_for_all,0,1}, [DbHandler, ContentHandler, AnalysisHandler]}}.
 
 %%====================================================================
 %% Internal functions

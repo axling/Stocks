@@ -6,3 +6,15 @@
 
 -record(trend_result, {date, days, slope, trend}).
 
+-record(adx, {company, date, value, di_plus, di_minus}).
+
+-record(macd, {company, date, value, signal}).
+
+-record(atr, {company, date, value}).
+
+-record(mvg_avg, {company, date, ten, thirty}).
+
+-record(exp_avg, {company, date, ten, thirty}).
+
+
+

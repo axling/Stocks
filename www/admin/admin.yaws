@@ -36,27 +36,43 @@ out(A) ->
     UpdatingCompanies = element(3, ContentState),
     UpdatingState =
 	if length(UpdatingCompanies) > 0 ->
-		updating,
+		%%updating
 		"System is updating";
 	   true ->
-		not_updating,
-		Update = list_to_atom(proplists:get_value("update", QueryList, 
-							  "false")),
-		if Update ->
+		%%not_updating
+		case lists:keymember("updatestocks", 1, QueryList) of
+		    true ->			
 			content_handler:update_content(),
 			"System is updating";
-		   true ->
-			{form, [], 
-			 [{input, [{name, "update_all_stock"}, {type, "submit"}, {value, "Update All Stocks"}]}]}
+		    false ->
+			{form, [{name, "all_update"}, {action, "admin.yaws"}, {method, get}], 
+			 [{input, [{name, "updatestocks"}, {type, "submit"}, {value, "Update All Stocks"}]}]}
+		end
+	end,
+    AnalysingCompanies = analysis_handler:dump(),
+    AnalysisState =
+	if length(AnalysingCompanies) > 0 ->
+		%%updating
+		"System is analysing";
+	   true ->
+		%%not_updating
+		case lists:keymember("analysestocks", 1, QueryList) of
+		    true ->			
+			analysis_handler:analyse(),
+			"System is analysing";
+		    false ->
+			{form, [{name, "all_analyse"}, {action, "admin.yaws"}, {method, get}], 
+			 [{input, [{name, "analysestocks"}, {type, "submit"}, {value, "Analyse All Stocks"}]}]}
 		end
 	end,
     
     Qh = db_handler:get_query_handle(company),
     Query = qlc:q([Company || Company <- Qh]),
     Companies = lists:sort(db_handler:q(Query)),
-    CompanyRows = create_company_rows(Companies, UpdatingCompanies),
+    CompanyRows = create_company_rows(Companies, UpdatingCompanies, AnalysingCompanies),
     
-    {ehtml, [UpdatingState, 
+    {ehtml, [UpdatingState,
+	     AnalysisState, 
 	     {br},
 	     {table, [],
 	      [{tr, [], 
@@ -64,19 +80,18 @@ out(A) ->
 		 {th, [], ["Instrument Nr"]},
 		 {th, [], ["Market Type"]},
 		 {th, [], []},
+		 {th, [], []},
 		 {th, [], []}]},
-	      {tr, [], 
+	       {tr, [], 
 	       [{form, [{name, "add_company"}, {action,"admin.yaws"}, {method, "post"}],
 		 [{td, [], [{input, [{name, "add_name"}, {type, text}]}]},
 		  {td, [], [{input, [{name, "add_instrument"}, {type, text}]}]},
 		  {td, [], [{input, [{name, "add_market"}, {type, text}]}]},
-		  {td, [{colspan, "2"}], [{input, [{type, "submit"}, {value, "Add Company"}]}]}]}]}]
+		  {td, [{colspan, "3"}], [{input, [{type, "submit"}, {value, "Add Company"}]}]}]}]}]
 	      ++ CompanyRows}]}.
 
 do_actions([]) ->
     ok;
-do_actions([{update_all_stock, Value}]) ->
-    content_handler:update_content();
 do_actions([{Type, Value} | _Rest] = PostList) ->
     case lists:nth(1, string:tokens(Type, "_")) /= "add" of
 	true ->
@@ -89,6 +104,13 @@ do_actions([{Type, Value} | _Rest] = PostList) ->
 							       string:to_upper(Instrument)]),
 		    [CompanyName]= db_handler:q(Query),
 		    content_handler:update_content([CompanyName]);
+		"analysestock" ->
+		    Qh = db_handler:get_query_handle(company),
+		    Query = qlc:q([Company#company.name || Company <- Qh, 
+							   Company#company.instrument == 
+							       string:to_upper(Instrument)]),
+		    [CompanyName]= db_handler:q(Query),
+		    analysis_handler:analyse(CompanyName);
 		Else -> 
 		    Qh = db_handler:get_query_handle(company),
 		    Query = qlc:q([Company || Company <- Qh, 
@@ -107,7 +129,7 @@ do_actions([{Type, Value} | _Rest] = PostList) ->
 	    ok = db_handler:create_entry(#company{name=Name, instrument=Instrument, market=Market})
     end.
 
-create_company_rows(Companies, UpdatingCompanies) ->
+create_company_rows(Companies, UpdatingCompanies, AnalysingCompanies) ->
     lists:map(
       fun(Company) ->
 	      Id = string:to_lower(Company#company.instrument), 
@@ -118,9 +140,19 @@ create_company_rows(Companies, UpdatingCompanies) ->
 				  {method, "post"}], 
 			   [{input, [{name, Id ++ "_updatestock"}, {type, "submit"}, 
 				     {value, "Update Stock Quotes"}]}]};
-		      Else ->
+		      _Else ->
 			  "Updating..."
-		  end,	      
+		  end,
+	      AnalyseAll =
+		  case lists:member(Company#company.name, AnalysingCompanies) of
+		      false ->
+			  {form, [{action, "admin.yaws"}, {name, Id ++ "analyse"},
+				  {method, "post"}], 
+			   [{input, [{name, Id ++ "_analysestock"}, {type, "submit"}, 
+				     {value, "Analyse Stock Quotes"}]}]};
+		      true ->
+			  "Analysing..."
+		  end,
 	      {tr, [], 
 	       [{td, [], [Company#company.name]},
 		{form, [{action, "admin.yaws"}, {name, Id ++ "_form"}, {method, "post"}], 
@@ -133,7 +165,9 @@ create_company_rows(Companies, UpdatingCompanies) ->
 		  {td, [], 
 		   [{input, [{type, "submit"}, {value, "Update Company Info"}]}]}]},
 		{td, [], 
-		 [UpdateAll]}]}
+		 [UpdateAll]},
+		{td, [], 
+		 [AnalyseAll]}]}
       end, Companies).
 
 make_query_string(QueryList) ->
