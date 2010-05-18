@@ -116,14 +116,10 @@ handle_info({analysis_done, Pid, DbResults},
 	    erlang:demonitor(MonitorRef),
 	    Pid ! finish_analysis,
 	    NewCompanies = lists:keydelete(Name, 1, Companies),
-	    {atomic, ok} = 
-		mnesia:transaction(
-		  fun() ->
-			  lists:foreach(
-			    fun(Entry) ->
-				    ok = mnesia:write(Entry)
-			    end, DbResults)
-		  end),
+	    lists:foreach(
+	      fun(Entry) ->
+		     db_lib:swrite(Entry)
+	      end, DbResults),	    
 	    {noreply, State#state{companies_analysing = NewCompanies}};
 	false ->
 	   io:format("Error: Received analysis_done for company that wasn't in the state ~p~n", 
@@ -152,9 +148,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%--------------------------------------------------------------------
 get_all_companies() ->
-    Qh = db_handler:get_query_handle(company),
-    Query = qlc:q([Company#company.name || Company <- Qh]),
-    db_handler:q(Query).
+    Query = qlc:q([Company#sec.name || Company <- db_lib:h(sec)]),
+    db_lib:e(Query).
 
 start_analysis(Companies, Types) ->
     lists:map(
@@ -168,31 +163,32 @@ analyse_company(Pid, Company, Types) ->
     Macd = 
 	case is_type_defined(macd, Types) of
 	    true ->
-		analysis_lib:analyse_macd(Company);
+		analysis_lib:analyse_macd(Company);		      
 	    false ->
 		[]
-	end,    
+	end,
     Atr = 
 	case is_type_defined(atr, Types) of
 	    true ->
 		analysis_lib:analyse_atr(Company);
+	
 	    false ->
 		[]
 	end,
     Adx = 
 	case is_type_defined(adx, Types) of
 	    true ->
-		analysis_lib:analyse_adx(Company);
+		analysis_lib:analyse_adx(Company);	
 	    false ->
 		[]
-	end,
+	end,    
     MvgAvg = 
 	case is_type_defined(mvg_avg, Types) of
 	    true ->
 		analysis_lib:analyse_mvg_avg(Company);
 	    false ->
 		[]
-	end,
+	end,        
     ExpAvg = 
 	case is_type_defined(exp_avg, Types) of
 	    true ->
@@ -200,8 +196,14 @@ analyse_company(Pid, Company, Types) ->
 	    false ->
 		[]
 	end,
-    
-    DbResults = lists:flatten([Macd, Atr, Adx, MvgAvg, ExpAvg]),
+    Stochastic = 
+	case is_type_defined(stochastic, Types) of
+	    true ->
+		analysis_lib:analyse_stochastic(Company);
+	    false ->
+		[]
+	end,
+    DbResults = lists:flatten([Macd, Atr, Adx, MvgAvg, ExpAvg, Stochastic]),
     Pid ! {analysis_done, self(), DbResults},
     receive finish_analysis -> ok end.
 

@@ -47,13 +47,13 @@ start_link() ->
 %% specifications.
 %%--------------------------------------------------------------------
 init([]) ->
-    DbHandler = {db_handler,{db_handler,start_link,[]},
-		 permanent,2000,worker,[db_handler]},
     ContentHandler = {content_handler,{content_handler,start_link,[]},
 		      permanent,2000,worker,[content_handler]},
     AnalysisHandler = {analysis_handler,{analysis_handler,start_link,[]},
 		      permanent,2000,worker,[analysis_handler]},
-    {ok,{{one_for_all,0,1}, [DbHandler, ContentHandler, AnalysisHandler]}}.
+    TimeManager = {time_manager,{time_manager,start_link,[]},
+		      permanent,2000,worker,[time_manager]},
+    {ok,{{one_for_all,0,1}, [ContentHandler, AnalysisHandler, TimeManager]}}.
 
 %%====================================================================
 %% Internal functions

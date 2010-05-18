@@ -1,0 +1,134 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd" >
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en" >
+  <head>
+    <title>Stocks</title>
+    <meta http-equiv="content-type" content="text/html;charset=utf-8" />
+    <link rel="stylesheet" href="../css/layout.css" type="text/css" />
+    <link rel="stylesheet" href="../css/menu.css" type="text/css" />
+    <link rel="stylesheet" href="../css/tables.css" type="text/css" />
+    <link rel="stylesheet" href="../css/general.css" type="text/css" />
+  </head>
+  <body>
+    <div id="pagewidth" >
+      <div id="header" >
+	<div id="headline">Stocks</div>
+	<erl>
+out(A) ->
+    {ehtml, [{ul, [{class, "menu"}], 
+	      [{li, [], 
+		[{a, [{href, "admin.yaws"}], [{span, [], ["Admin"]}]}]},
+	       {li, [],     
+		 [{a, [{href, "time.yaws"}, {class, active}], [{span, [], ["Time Management"]}]}]},
+	       {li, [],     
+		[{a, [{href, "code.yaws"}], [{span, [], ["Code Management"]}]}]}
+	       ]}]}.
+	</erl>
+      </div>
+      <div id="wrapper" class="clearfix" >
+	<div id="twocols" class="clearfix"> 
+	  <div id="maincol" >
+	    <erl>
+-include("mnesia_defs.hrl").
+out(A) ->
+    PostList = yaws_api:parse_post(A),
+    TaskAdd = 
+	case proplists:is_defined("task_submit", PostList) of
+	    true ->
+		do_add(PostList),
+		[f("Task Submitted", [])];
+	    false ->
+		[]
+	end,
+    FilteredTaskDelete = 
+	lists:filter(
+	  fun({Key, _}) ->
+		  string:substr(Key, 1, 14) == "delete_button_"
+	  end, PostList),
+    
+    DeleteTasks = lists:map(fun({Key, _}) ->
+				    list_to_integer(string:substr(Key, 15))
+			    end, FilteredTaskDelete),
+    TaskDelete = do_delete(DeleteTasks),    
+    TaskRows = get_tasks(),
+    {ehtml, 
+     TaskAdd ++
+      [{table, [], 
+       [{tr, [], 
+	 [{th, [], ["Task"]},
+	  {th, [], ["Time"]},
+	  {th, [], ["Action"]},
+	  {th, [], []}]},
+	{tr, [], 
+	 [{form, [{name, "add_task"}, {action, "time.yaws"}, {method, post}], 
+	   [{td, [], [{input, [{name, "task_name"}, {type, "text"}]}]},
+	    {td, [], 
+	     [{select, [{name, "task_time_type"}], 
+	       [{option, [{value, "today"}], ["Today"]},
+		{option, [{value, "daily"}], ["Daily"]}]},
+	      {select, [{name, "task_time_hour"}], 
+	       [lists:map(fun(Hour) -> 
+				  {option, [{value, integer_to_list(Hour)}], 
+				   [integer_to_list(Hour)]}
+			  end, lists:seq(0,23))]},
+	      {select, [{name, "task_time_minute"}], 
+	       [lists:map(fun(Minute) -> 
+				  {option, [{value, integer_to_list(Minute)}], 
+				   [integer_to_list(Minute)]}
+			  end, lists:seq(0,59))]},
+	      {select, [{name, "task_time_second"}], 
+	       [lists:map(fun(Second) -> 
+				  {option, [{value, integer_to_list(Second)}], 
+				   [integer_to_list(Second)]}
+			  end, lists:seq(0,59))]}]},
+	    {td, [], 
+	     [{select, [{name, "task_action"}], 
+	       [{option, [{value, "analyse"}], ["Analyse Stocks"]},
+		{option, [{value, "update"}], ["Update Stocks"]}]}]},
+	    {td, [], 
+	     [{input, [{name, "task_submit"}, {type, "submit"}, {value, "Add Task"}]}]}]}]}] ++
+       TaskRows}]}.
+
+do_add(PostList) ->
+    case proplists:get_value("task_name", PostList) of
+	undefined ->
+	    "Task name must be entered";
+	Name ->
+	    T = #task{name=Name,
+		      type=list_to_atom(proplists:get_value("task_time_type", PostList)), 
+		      time={list_to_integer(proplists:get_value("task_time_hour", PostList)),
+			    list_to_integer(proplists:get_value("task_time_minute", PostList)),
+			    list_to_integer(proplists:get_value("task_time_second", PostList))},
+		      action=list_to_atom(proplists:get_value("task_action", PostList))},
+	    time_manager:add_task(T)
+    end.
+
+do_delete(IdList) ->
+    lists:foreach(
+      fun(Id) ->
+	      time_manager:delete_task(Id)
+      end, IdList),
+    [].
+
+get_tasks() ->
+    lists:map(fun(#task{}=T) ->
+		      {tr, [], 
+		       [{form, [{name, "delete_task"}, {action, "time.yaws"}, {method, post}], 
+			 [{td, [], [T#task.name]},
+			  {td, [], [atom_to_list(T#task.type) ++ ": " ++ date_lib:convert_time_e_s(T#task.time)]},
+			  {td, [], [atom_to_list(T#task.action)]},
+			  {td, [] , [{input, [{type, "submit"}, {name, "delete_button_" ++ integer_to_list(T#task.id)}, 
+					      {value, "Delete Task"}]}]}]}]}
+	      end, time_manager:get_tasks()).
+       
+	</erl>
+        </div>
+<div id="rightcol" ></div>
+	    </div> 
+<div id="leftcol" ></div>
+</div>
+	<div id="footer" >
+	</div>
+	</div>
+</body>
+
+</html>

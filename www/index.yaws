@@ -28,27 +28,22 @@ out(A) ->
 -include_lib("stdlib/include/qlc.hrl").
 out(A) ->
     QueryList = yaws_api:parse_query(A),
-    TrendSort = list_to_integer(proplists:get_value("trend_sort", QueryList, "7")),
-    QhAnalysis = db_handler:get_query_handle(analysis),
-    QhCompany = db_handler:get_query_handle(company),
-    Q = qlc:q([Analysis#analysis.date || Analysis <- QhAnalysis]),
-    SortedDates = lists:sort(fun(A, B) ->
-				     date_lib:is_greater(B, A)
-			     end, db_handler:q(Q)),
-    case SortedDates of
+    TrendSort = list_to_integer(proplists:get_value("trend_sort", QueryList, "3")),
+    All = db_lib:e(qlc:q([{S#sec.name, S#sec.instrument, 
+			   S#sec.day_trend, S#sec.week_trend,
+			   S#sec.month_trend, S#sec.year_trend} ||
+			     S <- db_lib:h(sec)])),
+    case lists:sort(fun(A, B) when TrendSort >= 3, TrendSort =< 6 ->
+			    element(TrendSort, A) > element(TrendSort, B);
+		       (A, B) ->
+			    element(3, A) > element(3, B)
+		    end, All) of
 	[] ->
 	    {ehtml, [{p, [], ["No analysis available"]}]};
-	SortedDates ->
-	    LastWorkDay = hd(SortedDates),
-	    Query = qlc:q([A || A <- QhAnalysis, 
-				    A#analysis.date == LastWorkDay,
-				    ((A#analysis.result)#trend_result.days) == TrendSort]),
-	    Analysis = lists:sort(fun(#analysis{result=#trend_result{trend=TrendA}},
-				      #analysis{result=#trend_result{trend=TrendB}}) ->
-					  TrendA < TrendB
-				  end, db_handler:q(Query)),
-	    FiveWorst = lists:reverse(lists:sublist(Analysis, 5)),
-	    FiveBest = lists:reverse(lists:nthtail(length(Analysis)-5, Analysis)),
+	Sorted ->
+	    FiveBest = lists:sublist(Sorted, 5),
+	    FiveWorst = lists:nthtail(length(Sorted) - 5, Sorted),
+	    
 	    FiveBestRows = lists:map(fun map_analysis/1, FiveBest),
 	    FiveWorstRows = lists:map(fun map_analysis/1, FiveWorst),
 
@@ -56,49 +51,39 @@ out(A) ->
 		      [{tr, [], [{td, [{colspan, 5}], ["Five Best"]}]},
 		       {tr, [], 
 			[{th, [], ["Stock"]},
+			 {th, [], ["1 Day"]},
 			 {th, [], ["7 Days"]},
 			 {th, [], ["30 Days"]},
-			 {th, [], ["60 Days"]},
 			 {th, [], ["365 Days"]}]}] ++
 		      FiveBestRows ++
 		      [{tr, [], [{td, [{colspan, 5}], []}]},
 		       {tr, [], [{td, [{colspan, 5}], ["Five Worst"]}]},
 		       {tr, [], 
 			[{th, [], ["Stock"]},
+			 {th, [], ["1 Days"]},
 			 {th, [], ["7 Days"]},
 			 {th, [], ["30 Days"]},
-			 {th, [], ["60 Days"]},
 			 {th, [], ["365 Days"]}]}] ++
 		      FiveWorstRows
 		     }]}
     end.
 
-map_analysis(#analysis{company=Name}) ->
-    
-    QhAnalysis = db_handler:get_query_handle(analysis),
-    Q3 = qlc:q([Analysis#analysis.date || Analysis <- QhAnalysis]),
-    SortedDates = lists:sort(fun(A, B) ->
-				     date_lib:is_greater(B, A)
-			     end, db_handler:q(Q3)),
-    LastWorkDay = hd(SortedDates),
-    QhCompany = db_handler:get_query_handle(company),
-    Q = qlc:q([A1 || A1 <- QhAnalysis, 
-		     A1#analysis.date == LastWorkDay,
-		     A1#analysis.company == Name]),
-    Q2 = qlc:q([C#company.instrument || C <- QhCompany,
-					C#company.name == Name]),
-    [Instrument] = db_handler:q(Q2),
-    StocksAnalysis = lists:sort(fun(#analysis{result=#trend_result{days=Days1}},
-				    #analysis{result=#trend_result{days=Days2}}) ->
-					Days1 < Days2
-				end, db_handler:q(Q)),
+map_analysis({Name, Instrument, DayTrend, WeekTrend,
+	      MonthTrend, YearTrend}) when is_number(DayTrend),
+					   is_number(WeekTrend),
+					   is_number(MonthTrend),
+					   is_number(YearTrend)->    
     {tr, [],
-     [[{td, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], [Name]}]}] ++
-      lists:map(
-	fun(OneAnalysis) ->
-		{td, [], [io_lib:format("~.2f%", 
-					[(OneAnalysis#analysis.result)#trend_result.trend * 100])]}
-	end, StocksAnalysis)]}.
+     [{td, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], [Name]}]},
+      {td, [], [ff(100*DayTrend)]},
+      {td, [], [ff(100*WeekTrend)]},
+      {td, [], [ff(100*MonthTrend)]},
+      {td, [], [ff(100*YearTrend)]}]}.
+
+ff(F) when is_float(F) ->
+    f("~.2f", [F]);
+ff(F) when is_integer(F) ->
+    integer_to_list(F).
 
 	</erl>
         </div>

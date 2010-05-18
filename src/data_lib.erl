@@ -31,12 +31,14 @@ stochastic(ValueList, Period, Start, AccValues) when length(ValueList) >= Start 
     AccVal = 100 * ((Close - LowestLow)/(HighestHigh-LowestLow)),
     stochastic(ValueList, Period, Start + 1, [AccVal | AccValues]);
 stochastic(_, _, _, AccValues) ->
-    lists:reverse(AccValues).
+    PercentK = lists:reverse(AccValues),
+    PercentD = ema(PercentK, 3),
+    {lists:nthtail(2, PercentK), PercentD}.
     
 ema(Values, Period) ->
     K = 2/(Period+1),
     ema(lists:nthtail(Period, Values), K, 
-	[lists:sum(lists:sublist(Values, 1, Period))/Period]).
+	[lists:sum(lists:sublist(Values, Period))/Period]).
 
 ema([], _K, EmaList) ->
     lists:reverse(EmaList);
@@ -107,7 +109,7 @@ atr(ValueList, Period) ->
     ema(Tr, Period).
 
 macd(ValueList) ->
-    %% Valuelist is at least 36 long
+    %% Valuelist is at least 35 long
     Ema12 = data_lib:ema(lists:nthtail(14, ValueList), 12),
     Ema26 = data_lib:ema(ValueList, 26),
     Macd = [E12 - E26 || {E12, E26} <- lists:zip(Ema12, Ema26)],

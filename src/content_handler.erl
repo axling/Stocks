@@ -60,11 +60,9 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
     process_flag(trap_exit, true),
-    ok = db_handler:ready(),
+    ok = db_lib:init(),
     ok = inets:start(),
-    %%ibrowse:start(),
-    Secs = date_lib:seconds_until_time({date_lib:today(), {21,30,0}}),
-    erlang:start_timer(Secs*1000, self(), daily_update),
+        
     {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -86,25 +84,23 @@ handle_call(dump, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 handle_cast({update_content, all}, #state{updating_content=UpdComp}=State) ->
-    Qh = db_handler:get_query_handle(company),
-    Q = qlc:q([Company || Company <- Qh]),
-    Companies = db_handler:q(Q),
+    Qh = db_lib:h(sec),
+    Companies = db_lib:e(qlc:q([{Company#sec.name, Company#sec.instrument} || Company <- Qh])),
     FilteredCompanies = 
 	lists:filter(
-	  fun(Name) ->
+	  fun({Name, _}) ->
 		  not lists:keymember(Name, 1, UpdComp)
 	  end, Companies),
-    CompaniesUpdating = update_from_database(FilteredCompanies),		      
+    CompaniesUpdating = update_from_database(FilteredCompanies),
     {noreply, State#state{updating_content=lists:append([UpdComp, CompaniesUpdating])}};
 
 handle_cast({update_content, Companies}, #state{updating_content=UpdComp}=State) 
   when is_list(Companies) ->
-    Qh = db_handler:get_query_handle(company),
-    Q = qlc:q([Company || Company <- Qh, lists:member(Company#company.name, Companies)]),
-    CompaniesToUpdate = db_handler:q(Q),
+    Qh = db_lib:h(sec),    
+    CompaniesToUpdate = db_lib:e(qlc:q([{C#sec.name, C#sec.instrument} || C <- Qh, lists:member(C#sec.name, Companies)])),
     FilteredCompanies = 
 	lists:filter(
-	  fun(Name) ->
+	  fun({Name, _}) ->
 		  not lists:keymember(Name, 1, UpdComp)
 	  end, CompaniesToUpdate),
     CompaniesUpdating = update_from_database(FilteredCompanies),		      
@@ -119,30 +115,14 @@ handle_cast(_Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info({timeout, _, daily_update}, #state{updating_content=Comps}=State) ->
-    lists:foreach(
-      fun({_Name, MonitorRef, Pid}) ->
-	      erlang:demonitor(MonitorRef),
-	      exit(Pid, kill)
-      end, Comps),
-    Qh = db_handler:get_query_handle(company),
-    Q = qlc:q([Company || Company <- Qh]),
-    Companies = db_handler:q(Q),
-    UpdatingCompanies = update_from_database(Companies),
-    ok = send_start_for_next_batch(UpdatingCompanies),
-    Secs = date_lib:seconds_until_time({date_lib:tomorrow(), {21,30,0}}),
-    erlang:start_timer(Secs*1000, self(), daily_update),
-    {noreply, State#state{updating_content=UpdatingCompanies, retry=[]}};
-
 handle_info({timeout, _, retry_timer_timeout}, #state{retry=[]}=State) ->
     {noreply, State};
 handle_info({timeout, _, retry_timer_timeout}, #state{retry=RetryList}=State) ->
-    Qh = db_handler:get_query_handle(company),
-    Q = qlc:q([Company || Company <- Qh]),
+    Qh = db_lib:h(sec),
     Companies = lists:filter(
-		  fun(#company{name=CompanyName}) ->
+		  fun({CompanyName, _Instrument}) ->
 			  lists:member(CompanyName, RetryList)
-		  end, db_handler:q(Q)),
+		  end, db_lib:e(qlc:q([{Company#sec.name, Company#sec.instrument} || Company <- Qh]))),
     UpdatingCompanies = update_from_database(Companies),
     ok = send_start_for_next_batch(UpdatingCompanies),
     erlang:start_timer(300000, self(), retry_timer_timeout),
@@ -217,7 +197,7 @@ code_change(_OldVsn, State, _Extra) ->
 update_from_database(Companies) ->      
     UpdatingCompanies = 
 	lists:map(
-	  fun(#company{name=Name, instrument=Instrument}) ->
+	  fun({Name, Instrument}) ->
 		  Pid = spawn(?MODULE, updating_content, [self(), Name, Instrument]),
 		  MonitorRef = erlang:monitor(process, Pid),		  
 		  {Name, MonitorRef, Pid}
@@ -228,14 +208,11 @@ update_from_database(Companies) ->
 
 updating_content(Pid, Name, Instrument) ->
     Today = date_lib:today(),
-
-    Qh = db_handler:get_query_handle(stocks),
-    Q = qlc:q([Stock#stocks.date || Stock <- Qh, Stock#stocks.company == Name,
-				    date_lib:is_greater(Stock#stocks.date, ?BASE_DATE),
-				    date_lib:is_greater(Today, Stock#stocks.date)]),
-    Stocks = db_handler:q(Q),
+    
+    [Company] = db_lib:sread(sec, Name),
+    
     LatestDate = 
-	case date_lib:get_latest_date(Stocks) of
+	case get_latest_date(Company#sec.data) of
 	    [] ->
 		?BASE_DATE;
 	    Date when is_tuple(Date) ->
@@ -250,7 +227,19 @@ updating_content(Pid, Name, Instrument) ->
 		start_updating ->
 		    ok
 	    end,
-	    ok = omx_db_pop:save_instrument(Instrument, Name, Latest, Today),
+	    StockList = omx_db_pop:save_instrument(Instrument, Latest, Today),
+	    MergedData = lists:append([StockList, Company#sec.data]),
+	    Today1 = (hd(MergedData))#stock.date,
+	    DayDate = date_lib:date_minus_days(Today1, 1),
+	    WeekDate = date_lib:date_minus_days(Today1, 7),
+	    MonthDate = date_lib:date_minus_days(Today1, 30),
+	    YearDate = date_lib:date_minus_days(Today1, 365),
+	    {DayTrend, WeekTrend, MonthTrend, YearTrend} = get_trends({DayDate, 1}, {WeekDate, 7}, {MonthDate, 30}, {YearDate, 365}, MergedData),
+	    db_lib:swrite(Company#sec{data=MergedData,
+				      day_trend=DayTrend,
+				      week_trend=WeekTrend,
+				      month_trend=MonthTrend,
+				      year_trend=YearTrend}),
 	    Pid ! {updating_done, Name, self()};
 	false ->
 	    Pid ! {no_update_needed, Name, self()}
@@ -269,7 +258,23 @@ send_start_for_next_batch(Companies) ->
     catch _:_ ->
 	    ok
     end.
-	
+
+get_latest_date([]) ->
+    [];
+get_latest_date(Data) ->
+    First = hd(Data),
+    First#stock.date.
 	    
-    
-    
+get_trends(DayDate, WeekDate, MonthDate, YearDate, Data) ->
+    list_to_tuple([get_trend(Date, Data) || Date <- [DayDate, WeekDate, MonthDate, YearDate]]).
+
+get_trend(_Date, []) ->
+    0;
+get_trend({Date, _Days}, Data) ->
+    case date_lib:get_val_of_date([{D#stock.closing, D#stock.date} || D <- Data], Date) of
+	{error, _} ->
+	    0;
+	Value ->
+	    First = hd(Data),
+	    (First#stock.closing - Value)/Value		
+    end.

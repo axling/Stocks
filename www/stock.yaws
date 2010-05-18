@@ -26,167 +26,249 @@ out(A) ->
 	  <div id="maincol" >
 	    <erl>
 -include("include/mnesia_defs.hrl").
+-include("include/html_pages.hrl").
+-include("include/chart.hrl").
 -include_lib("stdlib/include/qlc.hrl").
 out(A) ->
+    Data = format_data(A),
+    render(Data).
+
+format_data(A) -> 
+    PostList = yaws_api:parse_post(A),
     QueryList = yaws_api:parse_query(A),
     case proplists:get_value("name", QueryList) of
 	Instrument when not is_atom(Instrument) ->
-	    PostList = yaws_api:parse_post(A),
-	   
-	    PageSize = list_to_integer(proplists:get_value("page_size", QueryList, "15")),
+	    Days = list_to_integer(proplists:get_value("days", QueryList, "30")),
+	    PageSize = list_to_integer(proplists:get_value("page_size", QueryList, "30")),
 	    PageNr = list_to_integer(proplists:get_value("page", QueryList, "1")),
+	    [Sec] = db_lib:e(qlc:q([S || S <- db_lib:h(sec), S#sec.instrument==Instrument])),
+	    Name = Sec#sec.name,
+	    Macd = safe_access(db_lib:e(qlc:q([M || M <- db_lib:h(analysis), M#analysis.company==Name,
+					  M#analysis.type==macd]))),
+	    Adx = safe_access(db_lib:e(qlc:q([M || M <- db_lib:h(analysis), M#analysis.company==Name,
+						   M#analysis.type==adx]))),
+	    Atr = safe_access(db_lib:e(qlc:q([M || M <- db_lib:h(analysis), M#analysis.company==Name,
+						   M#analysis.type==atr]))),
+	    MvgAvg = safe_access(db_lib:e(qlc:q([M || M <- db_lib:h(analysis), M#analysis.company==Name,
+						      M#analysis.type==mvg_avg]))),
+	    ExpAvg = safe_access(db_lib:e(qlc:q([M || M <- db_lib:h(analysis), M#analysis.company==Name,
+						      M#analysis.type==exp_avg]))),
+	    Stochastic = safe_access(db_lib:e(qlc:q([M || M <- db_lib:h(analysis), M#analysis.company==Name,
+							  M#analysis.type==stochastic]))),
+	    StockList = format_stock_list(Sec#sec.data, PageNr, PageSize, QueryList),
+	    DateAlign = lists:reverse([S#stock.date || S <- lists:sublist(Sec#sec.data, Days)]),
+	    StockChart = format_stock_chart(Name, lists:reverse(lists:sublist(Sec#sec.data, Days)), 
+					    lists:reverse(lists:sublist(MvgAvg#analysis.result, Days)), 
+					    lists:reverse(lists:sublist(ExpAvg#analysis.result, Days)),
+					    DateAlign),
+	    MacdChart = format_macd_chart(Name, lists:reverse(lists:sublist(Macd#analysis.result, Days)),
+					  DateAlign),
+	    AdxChart = format_adx_chart(Name, lists:reverse(lists:sublist(Adx#analysis.result, Days)),
+					DateAlign),
+	    AtrChart = format_atr_chart(Name, lists:reverse(lists:sublist(Atr#analysis.result, Days)),
+					DateAlign),
+	    StochasticChart = format_stochastic_chart(Name, lists:reverse(lists:sublist(Stochastic#analysis.result, Days)),
+						      DateAlign),
 	    
-	    QhCompany = db_handler:get_query_handle(company),
-	    [Company] = db_handler:q(qlc:q([C#company.name 
-					    || C <- QhCompany, 
-					       C#company.instrument==Instrument])),
-	    
-	    Days = list_to_integer(proplists:get_value("days", PostList, "30")),
-	    FromDate = date_lib:date_minus_days(date_lib:today(), Days+1),
-	    QhStocks = db_handler:get_query_handle(stocks),
-	    StockQuery = qlc:q([Stock ||
-				   Stock <- QhStocks, 
-				   Stock#stocks.company == Company,
-				   date_lib:is_greater(Stock#stocks.date, FromDate)]),	    
-	    Stocks = lists:sort(
-		       fun(StockA, StockB) ->
-			       date_lib:is_greater(StockB#stocks.date, StockA#stocks.date)
-		       end, db_handler:q(StockQuery)),
-	    {PageStocks, PaginateLinks} = get_page_stocks(lists:reverse(Stocks), 
-							  PageSize, PageNr, QueryList),
-
-	    QhMvgAvg = db_handler:get_query_handle(mvg_avg),
-	    MvgAvgQuery = qlc:q([M ||
-				   M <- QhMvgAvg, 
-				   M#mvg_avg.company == Company,
-				   date_lib:is_greater(M#mvg_avg.date, FromDate)]),
-	    MvgAvg = lists:sort(
-		       fun(A, B) ->
-			       date_lib:is_greater(B#mvg_avg.date, A#mvg_avg.date)
-		       end, db_handler:q(MvgAvgQuery)),
-	    QhExpAvg = db_handler:get_query_handle(exp_avg),
-	    ExpAvgQuery = qlc:q([M ||
-				    M <- QhExpAvg, 
-				    M#exp_avg.company == Company,
-				    date_lib:is_greater(M#exp_avg.date, FromDate)]),
-	    ExpAvg = lists:sort(
-		       fun(A, B) ->
-			       date_lib:is_greater(B#exp_avg.date, A#exp_avg.date)
-		       end, db_handler:q(ExpAvgQuery)),
-	    QhMacd = db_handler:get_query_handle(macd),
-	    MacdQuery = qlc:q([M ||
-				  M <- QhMacd, 
-				  M#macd.company == Company,
-				  date_lib:is_greater(M#macd.date, FromDate)]),
-	    Macd = lists:sort(
-		     fun(A, B) ->
-			     date_lib:is_greater(B#macd.date, A#macd.date)
-		     end, db_handler:q(MacdQuery)),
-	    QhAdx = db_handler:get_query_handle(adx),
-	    AdxQuery = qlc:q([M ||
-				 M <- QhAdx, 
-				 M#adx.company == Company,
-				 date_lib:is_greater(M#adx.date, FromDate)]),
-	    Adx = lists:sort(
-		    fun(A, B) ->
-			    date_lib:is_greater(B#adx.date, A#adx.date)
-		    end, db_handler:q(AdxQuery)),
-	    
-	    MacdChart = chart_builder:build_chart(
-			  Company, [{[M#macd.value || M <- Macd], "MACD", {"0000FF", {3,6,6}}},
-				    {[M#macd.signal || M <- Macd], "Signal", {"000000", {1,2,0}}},
-				    {lists:duplicate(length(Macd), 0.0), "Zero Line", {"000011", {3,2,0}}}],
-			  [M#macd.date || M <- Macd],
-			  length(Macd), 400, 170),
-	    ChartString = chart_builder:build_chart(
-  			    Company, [{[S#stocks.closing || S <- Stocks], Company, {"000000", {1,2,0}}}, 
-  				       {[M#mvg_avg.ten || M <- MvgAvg], "10 Day Moving Average", 
- 					{"0000FF", {3,6,6}}},
- 				      {[M#mvg_avg.thirty || M <- MvgAvg], "30 Day Moving Average", 
-   				       {"AA2277", {3,15,12}}},
-				      {[M#exp_avg.ten || M <- ExpAvg], "10 Day Exponential Average", 
-   				       {"CCCC00", {4,20,20}}},
-   				      {[M#exp_avg.thirty || M <- ExpAvg], "30 Day Exponential Average", 
-  				       {"006666", {3,10,10}}}],
-  			    [S#stocks.date || S <- Stocks],
-  			    length(Stocks), 400, 220),
-	   
-	    AdxChart = chart_builder:build_chart(
- 			 Company, [{[M#adx.di_plus || M <- Adx], "Di+", {"000000", {1,2,0}}},
- 				   {[M#adx.di_minus || M <- Adx], "Di-", {"00AAAA", {1,2,0}}},
- 				   {[M#adx.value || M <- Adx], "ADX", {"FF00FF", {3, 4, 6}}}],
-  			 [M#adx.date || M <- Adx],
-  			 length(Adx), 400, 170),
-	    
-	    %% Remove all values from stocks that are older than 30 days
-	    {ehtml, [{img, [{src, ChartString}, {alt, "Chart"}]},
-		     {img, [{src, MacdChart}, {alt, "MACD-Chart"}]},
-		     {img, [{src, AdxChart}, {alt, "ADX Chart"}]},
-		     {p, [],
-		      [{form, [{name,"days_select"}, {method, "post"}, {action, "stock.yaws?" ++ A#arg.querydata}], 
-			 [{select, [{name,"days"}, {onchange, "document.days_select.submit()"}], 
-			   [{option, [{value, "30"}], ["30"]},
-			    {option, [{value, "60"}], ["60"]},
-			    {option, [{value, "365"}], ["1 Year"]},
-			    {option, [{value, integer_to_list(365*2)}], ["2 Years"]}]}]}]},
-		     {table, [{class, "stock_table"}], 
-		      [{tr, [], [{th, [{colspan, 8}], [yaws_api:htmlize(Company) ++ ", " ++  
-						       integer_to_list(Days) ++ " days"]}]},
-		       {tr, [], [{td, [{class, "width"}], "Date"}, {td, [{class, "adjacent"}], "Closing"},
-				 {td, [{class, "adjacent"}], "Highest"}, {td, [{class, "adjacent"}], "Lowest"},
-				 {td, [{class, "adjacent"}], "Average"}, {td, [{class, "adjacent"}], "Turnover"},
-				 {td, [{class, "adjacent"}], "Volume"},
-				 {td, [{class, "adjacent"}], "Completions"}]}] 
-		      ++ 
-		      lists:map(
-			fun(Stock) ->
-				{tr, [], [{td, [], [date_lib:convert_date_e_s(Stock#stocks.date)]},
-					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.closing])},
-					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.highest])},
-					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.lowest])},
-					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.average])},
-					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.turnover])},
-					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.volume])},
-					  {td, [{class, "adjacent"}], f("~p", [Stock#stocks.completions])}]}
-			end, PageStocks) ++ 
-		     [{tr, [], 
-		       [{td, [{class, "paginate_links"},{colspan, 2}], 
-			 PaginateLinks
-			 }]}]
-		     }]};	       	
+	    #stock_page{all=false,
+			name=Name, instrument=Instrument,
+			days=Days,stock_chart=StockChart,
+			macd_chart=MacdChart,adx_chart=AdxChart,
+			atr_chart=AtrChart, stochastic_chart=StochasticChart, 
+			stock_table=StockList};
 	undefined ->
-	    Qh = db_handler:get_query_handle(company),
-	    Query = qlc:q([Company || Company <- Qh]),
-	    Companies = lists:sort(db_handler:q(Query)),
-	    {ehtml, [{h1, [], ["Stocks"]},
-		     {ul, [], 
-		      lists:map(fun(#company{instrument=Instrument, name=Name}) ->
-					{li, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], 
-						   [yaws_api:htmlize(Name)]}]}
-				end, Companies)}]}
+	    #stock_page{all=true,
+			all_stock_list=format_all_stock_list()}
     end.
+	
+render(#stock_page{}=S) ->
+    case S#stock_page.all of
+	true ->
+	    {ehtml, [{h1, [], ["All Stocks"]}] ++
+	     S#stock_page.all_stock_list};
+	false ->
+	    {ehtml, [{h2, [], [S#stock_page.name]}] ++
+	     S#stock_page.stock_chart ++
+	     S#stock_page.macd_chart ++
+	     S#stock_page.adx_chart ++
+	     S#stock_page.atr_chart ++
+	     S#stock_page.stochastic_chart ++
+	     S#stock_page.stock_table}
+    end.
+		     
+format_all_stock_list() ->
+    Securities = db_lib:e(qlc:q([{C#sec.name, C#sec.instrument, C#sec.market, C#sec.day_trend} || C <- db_lib:h(sec)])),
+    Large = lists:sort(lists:filter(fun({_, _, largecap, _}) ->
+					    true;
+				       ({_, _, "largecap", _}) ->
+					    true;
+				       (_Else) ->
+					    false
+				    end, Securities)),
+    Mid = lists:sort(lists:filter(fun({_, _, midcap, _}) ->
+					  true;
+				     ({_, _, "midcap", _}) ->
+					  true;
+				     (_Else) ->
+					  false
+				  end, Securities)),
+    Small = lists:sort(lists:filter(fun({_, _, smallcap, _}) ->
+					    true;
+				       ({_, _, "smallcap", _}) ->
+					    true;
+				       (_Else) ->
+					    false
+				    end, Securities)),
+    [{h3, [], ["Large Cap"]},
+     {ul, [], 
+      lists:map(fun({Name, Instrument, _, DayTrend}) ->
+			{li, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], 
+				   [yaws_api:htmlize(Name)]}, ", " ++ ff(100*DayTrend)]}
+		end, Large)},
+     {h3, [], ["Mid Cap"]},
+     {ul, [] ,
+      lists:map(fun({Name, Instrument, _, DayTrend}) ->
+			{li, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], 
+				   [yaws_api:htmlize(Name)]}, ", " ++ ff(100*DayTrend)]}
+		end, Mid)},
+     {h3, [], ["Small Cap"]},
+     {ul, [] ,
+      lists:map(fun({Name, Instrument, _, DayTrend}) ->
+			{li, [], [{a, [{href, "stock.yaws?name=" ++ Instrument}], 
+				   [yaws_api:htmlize(Name)]}, ", " ++ ff(100*DayTrend)]}
+		end, Small)}]. 
+format_stock_list([], PageNr, PageSize, QueryList) ->
+    [];
+format_stock_list(Data, PageNr, PageSize, QueryList) ->
+    {PageStocks, PaginateLinks} = get_page_stocks(Data, PageSize, PageNr, QueryList),
+    [{table, [{class, "stock_table"}], 
+      [[{td, [{class, "width"}], "Date"}, {td, [{class, "adjacent"}], "Closing"},
+	{td, [{class, "adjacent"}], "Highest"}, {td, [{class, "adjacent"}], "Lowest"},
+	{td, [{class, "adjacent"}], "Average"}, {td, [{class, "adjacent"}], "Turnover"},
+	{td, [{class, "adjacent"}], "Volume"},
+	{td, [{class, "adjacent"}], "Completions"}]] ++
+      lists:map(
+	fun(Stock) ->
+		{tr, [], [{td, [], [date_lib:convert_date_e_s(Stock#stock.date)]},
+			  {td, [{class, "adjacent"}], f("~p", [Stock#stock.closing])},
+			  {td, [{class, "adjacent"}], f("~p", [Stock#stock.highest])},
+			  {td, [{class, "adjacent"}], f("~p", [Stock#stock.lowest])},
+			  {td, [{class, "adjacent"}], f("~p", [Stock#stock.average])},
+			  {td, [{class, "adjacent"}], f("~p", [Stock#stock.turnover])},
+			  {td, [{class, "adjacent"}], f("~p", [Stock#stock.volume])},
+			  {td, [{class, "adjacent"}], f("~p", [Stock#stock.completions])}]}
+	end, PageStocks)},
+     PaginateLinks].
 
+format_stock_chart(Name, Data, MvgAvg, ExpAvg, DateAlign) ->
+    ImgString = chart_builder:render(
+		  #google_chart{title=lists:concat([Name, ": last ",  length(Data), " entries"]),
+				font_size=14,
+				height=250,
+				date_alignment=DateAlign,
+				data=
+				[#chart_data{
+				  color="000000",
+				  line_width=5,
+				  legend=Name,
+				  values=[{S#stock.closing, S#stock.date} || S <- Data]},
+				 #chart_data{color="115552",
+					     line_width=3,
+					     line_length=5,
+					     blank_length=5,
+					     legend=lists:concat([Name, ": moving average 10 days"]),
+					     values=[{M#mvg_avg.ten, M#mvg_avg.date} || M <- MvgAvg]},
+				 #chart_data{color="FFAA11",
+					     line_width=3,
+					     line_length=5,
+					     blank_length=5,
+					     legend=lists:concat([Name, ": moving average 30 days"]),
+					     values=[{M#mvg_avg.thirty, M#mvg_avg.date} || M <- MvgAvg]}]
+			       }),
+    [{img, [{src, ImgString}, {alt, "Chart"}]}].
 
-calculate_moving_average(StockValues, Days) when Days < length(StockValues) -> 
-    calculate_moving_average(StockValues, 1, Days, []).
+format_macd_chart(Name, Macd, DateAlign) ->
+    ImgString = chart_builder:render(
+		  #google_chart{title=lists:concat([Name, ": MACD chart"]),
+				font_size=12,
+				height=150,
+				date_alignment=DateAlign,
+				data=
+				[#chart_data{
+				  color="000000",
+				  line_width=5,
+				  legend="MACD",
+				  values=[{S#macd.value, S#macd.date } || S <- Macd]},				 
+				 #chart_data{color="115552",
+					     line_width=3,
+					     line_length=5,
+					     blank_length=5,
+					     legend="Signal",
+					     values=[{M#macd.signal, M#macd.date} || M <- Macd]}]
+			       }),
+    [{img, [{src, ImgString}, {alt, "Chart"}]}].
 
-calculate_moving_average(StockValues, Start, Days, AccValues) 
-  when (Start+Days-1) < length(StockValues) ->
-    MvgAvg = lists:sum(lists:sublist(StockValues, Start, Days))/Days,
-    calculate_moving_average(StockValues, Start+1, Days, [MvgAvg | AccValues]);
-calculate_moving_average(_StockValues, _Start, _Days, AccValues) ->
-    lists:reverse(AccValues).
+format_adx_chart(Name, Adx, DateAlign) ->
+    ImgString = chart_builder:render(
+		  #google_chart{title=lists:concat([Name, ": ADX chart"]),
+				font_size=12,
+				height=150,
+				date_alignment=DateAlign,
+				data=
+				[#chart_data{
+				  color="000000",
+				  line_width=5,
+				  legend="ADX",
+				  values=[{S#adx.value, S#adx.date} || S <- Adx]},
+				 #chart_data{color="115552",
+					     line_width=3,
+					     line_length=5,
+					     blank_length=5,
+					     legend="DI+",
+					     values=[{M#adx.di_plus, M#adx.date} || M <- Adx]},
+				#chart_data{color="FF9999",
+					    line_width=3,
+					    line_length=5,
+					    blank_length=5,
+					    legend="DI-",
+					    values=[{M#adx.di_minus, M#adx.date} || M <- Adx]}]
+			       }),
+    [{img, [{src, ImgString}, {alt, "Chart"}]}].
 
-calculate_cumulative_average(Values, Start) ->
-    {List1, RestList} = lists:split(Start+1, Values),
-    CumSum = lists:sum(List1)/length(List1),
-    cum_avg(RestList, [CumSum], Start+1).
+format_atr_chart(Name, Atr, DateAlign) ->
+    ImgString = chart_builder:render(
+		  #google_chart{title=lists:concat([Name, ": ATR chart"]),
+				font_size=12,
+				height=150,
+				date_alignment=DateAlign,
+				data=
+				[#chart_data{
+				  color="000000",
+				  line_width=5,
+				  legend="ATR",
+				  values=[{S#atr.value, S#atr.date} || S <- Atr]}]
+			       }),
+    [{img, [{src, ImgString}, {alt, "Chart"}]}].
 
-cum_avg([], AccVal, _) ->
-    lists:reverse(AccVal);
-cum_avg([First | Rest], [CA | _Rest]=AccVal, I) ->
-    Sum = (First + CA*(I-1))/I,
-    cum_avg(Rest, [Sum | AccVal], I+1).
+format_stochastic_chart(Name, Stochastic, DateAlign) ->
+    ImgString = chart_builder:render(
+		  #google_chart{title=lists:concat([Name, ": Stochastic chart"]),
+				font_size=12,
+				height=150,
+				date_alignment=DateAlign,
+				data=
+				[#chart_data{
+				  color="00FFFF",
+				  line_width=5,
+				  legend="%K",
+				  values=[{S#stochastic.percent_k, S#stochastic.date} || S <- Stochastic]},
+				#chart_data{
+				  color="000000",
+				  line_width=5,
+				  legend="%D",
+				  values=[{S#stochastic.percent_d, S#stochastic.date} || S <- Stochastic]}]
+			       }),
+    [{img, [{src, ImgString}, {alt, "Chart"}]}].
 
 get_page_stocks(Stocks, PageSize, PageNr, QueryList) ->
     LastPage = trunc(length(Stocks)/PageSize),
@@ -230,6 +312,16 @@ make_query_string(QueryList) ->
 		lists:concat([Key, "=", Val])
 	end, QueryList),
      "&amp;").
+
+safe_access([]) ->
+    #analysis{result=[]};
+safe_access(L) when is_list(L) ->
+    hd(L).
+    
+ff(F) when is_float(F) ->
+    f("~.2f", [F]);
+ff(F) when is_integer(F) ->
+    integer_to_list(F).
 
 	</erl>
         </div>
