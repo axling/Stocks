@@ -10,7 +10,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start/0, start_link/0]).
+-export([start_link/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -24,13 +24,6 @@
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the supervisor
 %%--------------------------------------------------------------------
-start() ->
-    spawn_link(fun() ->
-		       start_link(),
-		       %% infinite loop, ugly solution for now
-		       loop()
-	       end).
-
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
@@ -49,16 +42,11 @@ start_link() ->
 init([]) ->
     ContentHandler = {content_handler,{content_handler,start_link,[]},
 		      permanent,2000,worker,[content_handler]},
-    AnalysisHandler = {analysis_handler,{analysis_handler,start_link,[]},
-		      permanent,2000,worker,[analysis_handler]},
-    TimeManager = {time_manager,{time_manager,start_link,[]},
-		      permanent,2000,worker,[time_manager]},
-    {ok,{{one_for_all,0,1}, [ContentHandler, AnalysisHandler, TimeManager]}}.
+    AnalysisHandler = {analysis_handler,
+		       {analysis_handler,start_link,[]},
+		       permanent,2000,worker,[analysis_handler]},
+    {ok,{{one_for_all,0,1}, [ContentHandler, AnalysisHandler]}}.
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
-
-loop() ->
-    timer:sleep(100),
-    loop().

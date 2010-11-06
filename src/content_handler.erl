@@ -60,7 +60,6 @@ start_link() ->
 %%--------------------------------------------------------------------
 init([]) ->
     process_flag(trap_exit, true),
-    ok = db_lib:init(),
     ok = inets:start(),
         
     {ok, #state{}}.

@@ -10,9 +10,10 @@ init() ->
     case mnesia:start() of
 	ok ->
 	    io:format("Mnesia Started, create tables.~n", []),
-	    case create_tables([{sec, set, record_info(fields, sec)}, 
-				{analysis, bag, record_info(fields, analysis)},
-				{task, set, record_info(fields, task)}]) of
+	    case create_tables(
+		   [{sec, set, record_info(fields, sec)}, 
+		    {analysis, bag, record_info(fields, analysis)},
+		    {task, set, record_info(fields, task)}]) of
 		ok ->		    
 		    ok;
 		{error, Reason} ->

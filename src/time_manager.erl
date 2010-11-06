@@ -63,7 +63,6 @@ start_link() ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    ok = mnesia:wait_for_tables([task], infinity),
     Tasks = get_tasks(),
     StateList = lists:map(
 		  fun(#task{id=Id, type=today, time=Time}=T) ->
