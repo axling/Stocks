@@ -17,22 +17,9 @@
 %%====================================================================
 %% API
 %%====================================================================
-%%--------------------------------------------------------------------
-%% Function: 
-%% Description:
-%%--------------------------------------------------------------------
-analyse_macd(Company) ->
-    Macd = case db_lib:e(qlc:q([A || A <- db_lib:h(analysis),
-				     A#analysis.type==macd,
-				     A#analysis.company==Company])) of
-	       [] ->
-		   #analysis{company=Company, type=macd, result=[]};
-	       [Macd1] ->
-		   Macd1
-	   end,
-    [Stocks] = db_lib:sread(sec, Company),
-    LastDate = get_latest_stock_date(Stocks#sec.data),
-    LastMacd = get_latest_macd(Macd#analysis.result),
+analyse_macd(Stocks, Macd) ->
+    LastDate = get_latest_stock_date(Stocks),
+    LastMacd = get_latest_macd(Macd),
     Res = if 
 	      ((LastDate /= []) and (LastMacd /= []))  ->
 		  case date_lib:is_greater(LastDate, LastMacd) of
@@ -46,7 +33,7 @@ analyse_macd(Company) ->
 	      true ->
 		  []
 	  end,
-    Macd#analysis{result=lists:append([Res, Macd#analysis.result])}.
+    lists:append([Macd, Res]).
 
 analyse_atr(Company) ->
     Atr = case db_lib:e(qlc:q([A || A <- db_lib:h(analysis),
