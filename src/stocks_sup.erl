@@ -45,7 +45,10 @@ init([]) ->
     AnalysisHandler = {analysis_handler,
 		       {analysis_handler,start_link,[]},
 		       permanent,2000,worker,[analysis_handler]},
-    {ok,{{one_for_all,0,1}, [ContentHandler, AnalysisHandler]}}.
+    DbMysql = {db_mysql,
+		       {db_mysql,start_link,[]},
+		       permanent,2000,worker,[db_mysql]},
+    {ok,{{one_for_one,2,2}, [ContentHandler, AnalysisHandler, DbMysql]}}.
 
 %%====================================================================
 %% Internal functions
