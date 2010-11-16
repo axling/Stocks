@@ -83,27 +83,27 @@ handle_call(dump, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 handle_cast({update_content, all}, #state{updating_content=UpdComp}=State) ->
-    Qh = db_lib:h(sec),
-    Companies = db_lib:e(qlc:q([{Company#sec.name, Company#sec.instrument} || Company <- Qh])),
+    AllCompanies = db_mysql:get_all_companies(),
     FilteredCompanies = 
 	lists:filter(
-	  fun({Name, _}) ->
+	  fun({Name, _Instrument}) ->
 		  not lists:keymember(Name, 1, UpdComp)
-	  end, Companies),
+	  end, AllCompanies),
     CompaniesUpdating = update_from_database(FilteredCompanies),
     {noreply, State#state{updating_content=lists:append([UpdComp, CompaniesUpdating])}};
 
-handle_cast({update_content, Companies}, #state{updating_content=UpdComp}=State) 
-  when is_list(Companies) ->
-    Qh = db_lib:h(sec),    
-    CompaniesToUpdate = db_lib:e(qlc:q([{C#sec.name, C#sec.instrument} || C <- Qh, lists:member(C#sec.name, Companies)])),
+handle_cast({update_content, Companies}, 
+	    #state{updating_content=UpdComp}=State) when is_list(Companies) ->
+    CompaniesToUpdate = [{Name, db_mysql:get_company_instrument(Name)} 
+			 || Name <- Companies],
     FilteredCompanies = 
 	lists:filter(
-	  fun({Name, _}) ->
+	  fun({Name, _Instrument}) ->
 		  not lists:keymember(Name, 1, UpdComp)
 	  end, CompaniesToUpdate),
     CompaniesUpdating = update_from_database(FilteredCompanies),		      
-    {noreply, State#state{updating_content=lists:append([UpdComp, CompaniesUpdating])}};
+    {noreply, State#state{updating_content=lists:append(
+					     [UpdComp, CompaniesUpdating])}};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -117,12 +117,9 @@ handle_cast(_Msg, State) ->
 handle_info({timeout, _, retry_timer_timeout}, #state{retry=[]}=State) ->
     {noreply, State};
 handle_info({timeout, _, retry_timer_timeout}, #state{retry=RetryList}=State) ->
-    Qh = db_lib:h(sec),
-    Companies = lists:filter(
-		  fun({CompanyName, _Instrument}) ->
-			  lists:member(CompanyName, RetryList)
-		  end, db_lib:e(qlc:q([{Company#sec.name, Company#sec.instrument} || Company <- Qh]))),
-    UpdatingCompanies = update_from_database(Companies),
+    CompaniesToUpdate = [{Name, db_mysql:get_company_instrument(Name)} 
+			 || Name <- Companies],
+    UpdatingCompanies = update_from_database(CompaniesToUpdate),
     ok = send_start_for_next_batch(UpdatingCompanies),
     erlang:start_timer(300000, self(), retry_timer_timeout),
     {noreply, State#state{retry = [],
@@ -227,18 +224,7 @@ updating_content(Pid, Name, Instrument) ->
 		    ok
 	    end,
 	    StockList = omx_db_pop:save_instrument(Instrument, Latest, Today),
-	    MergedData = lists:append([StockList, Company#sec.data]),
-	    Today1 = (hd(MergedData))#stock.date,
-	    DayDate = date_lib:date_minus_days(Today1, 1),
-	    WeekDate = date_lib:date_minus_days(Today1, 7),
-	    MonthDate = date_lib:date_minus_days(Today1, 30),
-	    YearDate = date_lib:date_minus_days(Today1, 365),
-	    {DayTrend, WeekTrend, MonthTrend, YearTrend} = get_trends({DayDate, 1}, {WeekDate, 7}, {MonthDate, 30}, {YearDate, 365}, MergedData),
-	    db_lib:swrite(Company#sec{data=MergedData,
-				      day_trend=DayTrend,
-				      week_trend=WeekTrend,
-				      month_trend=MonthTrend,
-				      year_trend=YearTrend}),
+	    
 	    Pid ! {updating_done, Name, self()};
 	false ->
 	    Pid ! {no_update_needed, Name, self()}
