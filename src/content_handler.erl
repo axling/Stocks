@@ -205,10 +205,8 @@ update_from_database(Companies) ->
 updating_content(Pid, Name, Instrument) ->
     Today = date_lib:today(),
     
-    [Company] = db_lib:sread(sec, Name),
-    
     LatestDate = 
-	case get_latest_date(Company#sec.data) of
+	case db_mysql:get_latest_stock_date(Instrument)  of
 	    [] ->
 		?BASE_DATE;
 	    Date when is_tuple(Date) ->
@@ -234,32 +232,15 @@ updating_content(Pid, Name, Instrument) ->
 	    ok
     end.
 
-send_start_for_next_batch(Companies) ->
-    try hd(Companies) of
-	{_,_,Pid} ->
-	    timer:sleep(5000),
-	    Pid ! start_updating,
-	    ok
-    catch _:_ ->
-	    ok
-    end.
+send_start_for_next_batch([]) ->
+    ok;
+send_start_for_next_batch([{_,_, Pid} | Companies]) ->
+    timer:sleep(2000),
+    Pid ! start_updating,
+    ok.
 
 get_latest_date([]) ->
     [];
 get_latest_date(Data) ->
     First = hd(Data),
     First#stock.date.
-	    
-get_trends(DayDate, WeekDate, MonthDate, YearDate, Data) ->
-    list_to_tuple([get_trend(Date, Data) || Date <- [DayDate, WeekDate, MonthDate, YearDate]]).
-
-get_trend(_Date, []) ->
-    0;
-get_trend({Date, _Days}, Data) ->
-    case date_lib:get_val_of_date([{D#stock.closing, D#stock.date} || D <- Data], Date) of
-	{error, _} ->
-	    0;
-	Value ->
-	    First = hd(Data),
-	    (First#stock.closing - Value)/Value		
-    end.
