@@ -12,7 +12,7 @@
 %%Side-effects
 download(Page) ->
     inets:start(),
-    {ok, {_,Headers, Body}} = http:request(Page),
+    {ok, {_,Headers, Body}} = httpc:request(Page),
     inets:stop(),
     {Headers, Body}.
 
@@ -36,8 +36,8 @@ download_stock_data(Instrument, StartDate, EndDate) ->
 	++ "<param name=\"ext_xslt_tableId\" value=\"historicalTable\"/>\n"
 	++ "</post>",
     
-    UrlEncodedReq = yaws_api:url_encode(Request),
-    {ok, {_, _, Result}} = http:request(post, {"http://www.nasdaqomxnordic.com/webproxy/DataFeedProxy.aspx",
+    UrlEncodedReq = edoc_lib:escape_uri(Request),
+    {ok, {_, _, Result}} = httpc:request(post, {"http://www.nasdaqomxnordic.com/webproxy/DataFeedProxy.aspx",
 					       [], "application/x-www-form-urlencoded;charset=UTF-8", 
 					       "xmlquery=" ++ UrlEncodedReq}, 
 					[], []),
@@ -63,9 +63,12 @@ download_stock_data2(Instrument, StartDate, EndDate) ->
 	++ "<param name=\"ext_xslt_tableId\" value=\"historicalTable\"/>\n"
 	++ "</post>",
     
-    UrlEncodedReq = yaws_api:url_encode(Request),
+    UrlEncodedReq = edoc_lib:escape_uri(Request),
     {ok, _, _, Result} =  ibrowse:send_req("http://www.nasdaqomxnordic.com/webproxy/DataFeedProxy.aspx",
 		     [{"Content-Type", "application/x-www-form-urlencoded;charset=UTF-8"}], 
 		     post, "xmlquery=" ++ UrlEncodedReq,
 		     [{proxy_host, "www-proxy.ericsson.se"}, {proxy_port, 8080}]),
     Result.
+
+	
+	

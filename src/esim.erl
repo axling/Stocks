@@ -2,21 +2,25 @@
 %%% File    : esim.erl
 %%% Author  :  <eeriaxl@EV001A4B76217E>
 %%% Description : This file will run a stock market simulation
-%%% which simulates that you buy a stock when the gradient reches a 
+%%% which simulates that you buy a stock when the gradient reaches a 
 %%% certain level. The same goes for when you sell a stock.
 %%%
 %%% Created : 18 May 2009 by  <eeriaxl@EV001A4B76217E>
 %%%-------------------------------------------------------------------
 -module(esim).
 
--compile(export_all).
+-export([run_one/4, run/3, run_sim/3]).
 
 -include("stocks.hrl").
 
-%% Stocks = [{ericb, "ericsson.dets"},...]
+%% Stocks = [{ericb, [{{2000,1,2}, 1.2}, {{2000,1,3}, 2.1}, ....]},...]
 %% Params = [{buy, ericb, [{ericb, [{10, 0.5}, {50, 0.2}]},
 %%                         {omx, [{10, 0.1},{100, 0.1}]}]},
 %%           {sell, ericb, [{ericb, }]}]
+
+run_one(Stocks, BuyList, SellList, Market) ->
+    run([{c, Stocks}], [{buy, c, [{c, BuyList}]}, {sell, c, [{c, SellList}]}],
+       Market).
 
 run(Stocks, Params, #market{} = MarketParams) ->
     StockStruct = compile_stock_struct(Stocks),	
@@ -137,13 +141,10 @@ calculate_buy_amount(StockName, [_First | Rest], AccAmount) ->
 
 
 %%%%%%%%%%%%% Managing StockValues %%%%%%%%%%%%%%%%%%%%%%%%%
-extract_stock(StockFile) ->
-    db:get_stocks(StockFile).
-
 compile_stock_struct(Stocks) ->
-    lists:map(fun({StockName, StockFile}) ->
-			  Vals = extract_stock(StockFile),
-			  {StockName,store_stock_vals(Vals, gb_trees:empty())}
+    lists:map(fun({StockName, StockValues}) ->
+		      {StockName, store_stock_vals(StockValues, 
+						   gb_trees:empty())}
 	      end, Stocks).
 
 store_stock_vals([], Tree) ->

@@ -62,7 +62,7 @@ match_type(String) ->
  	     to_integer(Completions)};
 
 	nomatch ->
-	    undefined
+	    nomatch
     end.
 
 is_match(String, RegExp) ->

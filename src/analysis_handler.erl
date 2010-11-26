@@ -1,7 +1,7 @@
 %%%-------------------------------------------------------------------
 %%% File    : analysis_handler.erl
 %%% Author  :  <eeriaxl@EV001A4B76217E>
-%%% Description : 
+%%% Description :
 %%%
 %%% Created :  1 Feb 2010 by  <eeriaxl@EV001A4B76217E>
 %%%-------------------------------------------------------------------
@@ -13,11 +13,12 @@
 -include("mnesia_defs.hrl").
 
 %% API
--export([start_link/0, analyse/0, analyse/1, analyse/2, analyse_company/3, dump/0]).
+-export([start_link/0, analyse/0, analyse/1, analyse/2,
+	 analyse_company/3, dump/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-	 terminate/2, code_change/3]).
+         terminate/2, code_change/3]).
 
 -record(state, {companies_analysing=[]}).
 
@@ -31,12 +32,12 @@ analyse(Companies) when is_list(Companies) ->
     analyse(Companies, all).
 
 analyse(Companies, Types) when is_list(Companies),
-			       is_list(Types); is_atom(Types) ->
+                               is_list(Types); is_atom(Types) ->
     gen_server:cast(?MODULE, {start_analysis, Companies, Types}).
 
 dump() ->
     gen_server:call(?MODULE, dump).
-    
+
 %%--------------------------------------------------------------------
 %% Function: start_link() -> {ok,Pid} | ignore | {error,Error}
 %% Description: Starts the server
@@ -80,15 +81,15 @@ handle_call(_, _From, State) ->
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
 handle_cast(start_analysis, #state{companies_analysing=Companies}=State) ->
-    AllCompanies = get_all_companies(),
+    AllCompanies = [Name || {Name, _} <- db_mysql:get_all_companies()],
     AnalysingCompanies = start_analysis(AllCompanies, all),
-    {noreply, State#state{companies_analysing=lists:usort(AnalysingCompanies 
-							  ++ Companies)}};
-handle_cast({start_analysis, Companies, Types}, 
-	    #state{companies_analysing=StateCompanies}=State) ->
+    {noreply, State#state{companies_analysing=lists:usort(AnalysingCompanies
+                                                          ++ Companies)}};
+handle_cast({start_analysis, Companies, Types},
+            #state{companies_analysing=StateCompanies}=State) ->
     AnalysingCompanies = start_analysis(Companies, Types),
-    {noreply, State#state{companies_analysing=lists:usort(AnalysingCompanies 
-							  ++ StateCompanies)}};
+    {noreply, State#state{companies_analysing=lists:usort(AnalysingCompanies
+                                                          ++ StateCompanies)}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -98,33 +99,45 @@ handle_cast(_Msg, State) ->
 %%                                       {stop, Reason, State}
 %% Description: Handling all non call/cast messages
 %%--------------------------------------------------------------------
-handle_info({'DOWN', MonitorRef, process, Pid, _Reason}, 
-	    #state{companies_analysing=Companies}=State) ->
+handle_info({'DOWN', MonitorRef, process, Pid, Reason},
+            #state{companies_analysing=Companies}=State) ->
     case lists:keyfind(MonitorRef, 2, Companies) of
-	{Name, MonitorRef, Pid} ->	    
-	    NewCompanies = lists:keydelete(Name, 1, Companies),
-	    {noreply, State#state{companies_analysing = NewCompanies}};
-	false ->
-	    io:format("Error: Received exit for company that wasn't in the state ~p~n", 
-		      [State]),
-	    {noreply, State}
+        {Name, MonitorRef, Pid} ->
+            NewCompanies = lists:keydelete(Name, 1, Companies),
+	    log_handler:log(analysis_handler,
+			    "Error: Received exit with reason ~p for company in the state ~p~n",
+			    [Reason, State]),
+	    case NewCompanies of
+		[] ->
+		    ok;
+		[{_, _, NewPid} | _Rest] ->
+		    NewPid ! start_analysis
+	    end,
+            {noreply, State#state{companies_analysing = NewCompanies}};
+        false ->
+            log_handler:log(analysis_handler,
+			    "Error: Received exit with reason ~p for company that wasn't in the state ~p~n",
+			    [Reason, State]),
+            {noreply, State}
     end;
-handle_info({analysis_done, Pid, DbResults}, 
-	    #state{companies_analysing=Companies}=State) ->
+handle_info({analysis_done, Company, Pid},
+            #state{companies_analysing=Companies}=State) ->
     case lists:keyfind(Pid, 3, Companies) of
-	{Name, MonitorRef, Pid} ->
-	    erlang:demonitor(MonitorRef),
-	    Pid ! finish_analysis,
-	    NewCompanies = lists:keydelete(Name, 1, Companies),
-	    lists:foreach(
-	      fun(Entry) ->
-		     db_lib:swrite(Entry)
-	      end, DbResults),	    
-	    {noreply, State#state{companies_analysing = NewCompanies}};
-	false ->
-	   io:format("Error: Received analysis_done for company that wasn't in the state ~p~n", 
-		      [State]),
-	    {noreply, State}
+        {Name, MonitorRef, Pid} ->
+            erlang:demonitor(MonitorRef),
+            Pid ! finish_analysis,
+            NewCompanies = lists:keydelete(Name, 1, Companies),
+	    case NewCompanies of
+		[] ->
+		    ok;
+		[{_, _, NewPid} | _Rest] ->
+		    NewPid ! start_analysis
+	    end,
+            {noreply, State#state{companies_analysing = NewCompanies}};
+        false ->
+	    log_handler:log(analysis_handler, "Error: Received analysis_done for company ~p that wasn't in the state ~p~n",
+			[Company, State]),
+            {noreply, State}
     end.
 
 %%--------------------------------------------------------------------
@@ -147,70 +160,40 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-get_all_companies() ->
-    Query = qlc:q([Company#sec.name || Company <- db_lib:h(sec)]),
-    db_lib:e(Query).
-
 start_analysis(Companies, Types) ->
-    lists:map(
-      fun(Name) ->
-	      Pid = spawn(?MODULE, analyse_company, [self(), Name, Types]),
-	      MonitorRef = erlang:monitor(process, Pid),  
-	      {Name, MonitorRef, Pid}
-      end, Companies).
-    
+    List = lists:map(
+	     fun(Name) ->
+		     Pid = spawn(?MODULE, analyse_company,
+				 [self(), Name, Types]),
+		     MonitorRef = erlang:monitor(process, Pid),
+		     {Name, MonitorRef, Pid}
+      end, Companies),
+    [{_, _, FirstPid} | _Rest] = List,
+    FirstPid ! start_analysis,
+    List.
+
 analyse_company(Pid, Company, Types) ->
-    Macd = 
-	case is_type_defined(macd, Types) of
-	    true ->
-		analysis_lib:analyse_macd(Company);		      
-	    false ->
-		[]
+    receive start_analysis -> ok end,
+    Stocks = case db_mysql:count_all_stocks(Company) > 40 of
+		 true ->
+		     db_mysql:get_nr_of_stocks(Company, 40);
+		 false ->    
+		     db_mysql:get_all_stocks(Company)
+	     end,
+    AnalysisFun =
+	fun(Type) ->
+		LatestAnalysed = db_mysql:get(Type, Company, 1),
+		Results = analysis_lib:analyse(Type, Stocks, LatestAnalysed),
+		[ok = db_mysql:insert(Type, Company, Res) || Res <- Results]
 	end,
-    Atr = 
-	case is_type_defined(atr, Types) of
-	    true ->
-		analysis_lib:analyse_atr(Company);
-	
-	    false ->
-		[]
-	end,
-    Adx = 
-	case is_type_defined(adx, Types) of
-	    true ->
-		analysis_lib:analyse_adx(Company);	
-	    false ->
-		[]
-	end,    
-    MvgAvg = 
-	case is_type_defined(mvg_avg, Types) of
-	    true ->
-		analysis_lib:analyse_mvg_avg(Company);
-	    false ->
-		[]
-	end,        
-    ExpAvg = 
-	case is_type_defined(exp_avg, Types) of
-	    true ->
-		analysis_lib:analyse_exp_avg(Company);
-	    false ->
-		[]
-	end,
-    Stochastic = 
-	case is_type_defined(stochastic, Types) of
-	    true ->
-		analysis_lib:analyse_stochastic(Company);
-	    false ->
-		[]
-	end,
-    DbResults = lists:flatten([Macd, Atr, Adx, MvgAvg, ExpAvg, Stochastic]),
-    Pid ! {analysis_done, self(), DbResults},
+    case Types of
+	all ->
+	    lists:foreach(AnalysisFun, [macd, atr, adx, mvg_avg, exp_avg,
+				       stochastic]);
+	Types ->
+	    lists:foreach(AnalysisFun, Types)
+    end,
+    Pid ! {analysis_done, Company, self()},
     receive finish_analysis -> ok end.
 
-is_type_defined(_Type, all) ->
-    true;
-is_type_defined(Type, Types) ->
-    lists:member(Type, Types).
-	     
-    
-    
+

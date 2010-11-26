@@ -11,164 +11,48 @@
 -include_lib("stdlib/include/qlc.hrl").
 
 %% API
--export([analyse_macd/1, analyse_atr/1, analyse_adx/1,
-	 analyse_mvg_avg/1, analyse_exp_avg/1, analyse_stochastic/1]).
+-export([analyse/3]).
+
+-define('LENGTH', fun(atr) ->
+			  ?ATR_LENGTH;
+		     (adx) ->
+			  ?ADX_LENGTH;
+		     (macd) ->
+			  ?MACD_LENGTH;
+		     (mvg_avg) ->
+			  ?MVG_AVG_LENGTH;
+		     (exp_avg) ->
+			  ?EXP_AVG_LENGTH;
+		     (stochastic) ->
+			  ?STOCHASTIC_LENGTH
+		  end).
+-define('ATR_LENGTH', 14).
+-define('ADX_LENGTH', 28).
+-define('MACD_LENGTH', 34).
+-define('MVG_AVG_LENGTH', 30).
+-define('EXP_AVG_LENGTH', 30).
+-define('STOCHASTIC_LENGTH', 12).
 
 %%====================================================================
 %% API
 %%====================================================================
-analyse_macd(Stocks, Macd) ->
+analyse(Type, Stocks, AnalysisData) ->
     LastDate = get_latest_stock_date(Stocks),
-    LastMacd = get_latest_macd(Macd),
-    Res = if 
-	      ((LastDate /= []) and (LastMacd /= []))  ->
-		  case date_lib:is_greater(LastDate, LastMacd) of
-		      true ->
-			  fix_macd(Stocks#sec.data, LastMacd);
-		      false ->
-			  []
-		  end;
-	      ((LastDate /= []) and (LastMacd == [])) ->
-		  fix_macd(Stocks#sec.data, beginning);
-	      true ->
-		  []
-	  end,
-    lists:append([Macd, Res]).
+    LastAnalysisDate = get_latest_analysis_date(Type, AnalysisData),
+    if 
+	((LastDate /= []) and (LastAnalysisDate /= []))  ->
+	    case date_lib:is_greater(LastDate, LastAnalysisDate) of
+		true ->
+		    fix(Type, Stocks, LastAnalysisDate);
+		false ->
+		    []
+	    end;
+	((LastDate /= []) and (LastAnalysisDate == [])) ->
+	    fix(Type, Stocks, beginning);
+	true ->
+	    []
+    end.
 
-analyse_atr(Company) ->
-    Atr = case db_lib:e(qlc:q([A || A <- db_lib:h(analysis),
-				    A#analysis.type==atr,
-				    A#analysis.company==Company])) of
-	      [] ->
-		  #analysis{company=Company, type=atr, result=[]};
-	      [Atr1] ->
-		  Atr1
-	  end,
-    [Stocks] = db_lib:sread(sec, Company),
-    LastDate = get_latest_stock_date(Stocks#sec.data),
-    LastAtr = get_latest_atr(Atr#analysis.result),
-    Res = if 
-	      ((LastDate /= []) and (LastAtr/= []))  ->
-		  case date_lib:is_greater(LastDate, LastAtr) of
-		      true ->
-			  fix_atr(Stocks#sec.data, LastAtr);
-		      false ->
-			  []
-		  end;
-	      ((LastDate /= []) and (LastAtr == [])) ->
-		  fix_atr(Stocks#sec.data, beginning);
-	      true ->
-		  []
-	  end,
-    Atr#analysis{result=lists:append([Res, Atr#analysis.result])}.
-
-analyse_adx(Company) ->
-    Adx = case db_lib:e(qlc:q([A || A <- db_lib:h(analysis),
-				    A#analysis.type==adx,
-				    A#analysis.company==Company])) of
-	      [] ->
-		  #analysis{company=Company, type=adx, result=[]}; 
-	      [Adx1] ->
-		  Adx1
-	  end,
-    [Stocks] = db_lib:sread(sec, Company),
-    LastDate = get_latest_stock_date(Stocks#sec.data),
-    LastAdx = get_latest_adx(Adx#analysis.result),    
-    Res = if 
-	      ((LastDate /= []) and (LastAdx/= []))  ->
-		  case date_lib:is_greater(LastDate, LastAdx) of
-		      true ->
-			  fix_adx(Stocks#sec.data, LastAdx);
-		      false ->
-			  []
-		  end;
-	      ((LastDate /= []) and (LastAdx == [])) ->
-		  fix_adx(Stocks#sec.data, beginning);
-	      true ->
-		  []
-	  end,
-    Adx#analysis{result=lists:append([Res, Adx#analysis.result])}.
-
-analyse_mvg_avg(Company) ->
-    MvgAvg = case db_lib:e(qlc:q([A || A <- db_lib:h(analysis),
-				       A#analysis.type==mvg_avg,
-				       A#analysis.company==Company])) of
-		 [] ->
-		     #analysis{company=Company, type=mvg_avg, result=[]};
-		 [MvgAvg1] ->
-		     MvgAvg1
-	     end,
-    [Stocks] = db_lib:sread(sec, Company),
-    LastDate = get_latest_stock_date(Stocks#sec.data),
-    LastMvgAvg = get_latest_mvg_avg(MvgAvg#analysis.result),     
-    Res = if 
-	      ((LastDate /= []) and (LastMvgAvg/= []))  ->
-		  case date_lib:is_greater(LastDate, LastMvgAvg) of
-		      true ->
-			  fix_mvg_avg(Stocks#sec.data, LastMvgAvg);
-		      false ->
-			  []
-		  end;
-	      ((LastDate /= []) and (LastMvgAvg == [])) ->
-		  fix_mvg_avg(Stocks#sec.data, beginning);
-	      true ->
-		  []
-	  end,
-    MvgAvg#analysis{result=lists:append([Res, MvgAvg#analysis.result])}.
-
-analyse_exp_avg(Company) ->
-    ExpAvg = case db_lib:e(qlc:q([A || A <- db_lib:h(analysis),
-				       A#analysis.type==exp_avg,
-				       A#analysis.company==Company])) of
-		 [] ->
-		     #analysis{company=Company, type=exp_avg, result=[]};
-		 [ExpAvg1] ->
-		     ExpAvg1
-	     end,
-    [Stocks] = db_lib:sread(sec, Company),
-    LastDate = get_latest_stock_date(Stocks#sec.data),
-    LastExpAvg = get_latest_exp_avg(ExpAvg#analysis.result),
-    Res = if 
-	      ((LastDate /= []) and (LastExpAvg/= []))  ->
-		  case date_lib:is_greater(LastDate, LastExpAvg) of
-		      true ->
-			  fix_exp_avg(Stocks#sec.data, LastExpAvg);
-		      false ->
-			  []
-		  end;
-	      ((LastDate /= []) and (LastExpAvg == [])) ->
-		  fix_exp_avg(Stocks#sec.data, beginning);
-	      true ->
-		  []
-	  end,
-    ExpAvg#analysis{result=lists:append([Res, ExpAvg#analysis.result])}.
-
-analyse_stochastic(Company) ->
-    Stochastic = case db_lib:e(qlc:q([A || A <- db_lib:h(analysis),
-				       A#analysis.type==stochastic,
-				       A#analysis.company==Company])) of
-		 [] ->
-		     #analysis{company=Company, type=stochastic, result=[]};
-		 [Stochastic1] ->
-		     Stochastic1
-	     end,
-    [Stocks] = db_lib:sread(sec, Company),
-    LastDate = get_latest_stock_date(Stocks#sec.data),
-    LastStochastic = get_latest_stochastic(Stochastic#analysis.result),
-    Res = if 
-	      ((LastDate /= []) and (LastStochastic/= []))  ->
-		  case date_lib:is_greater(LastDate, LastStochastic) of
-		      true ->
-			  fix_stochastic(Stocks#sec.data, LastStochastic);
-		      false ->
-			  []
-		  end;
-	      ((LastDate /= []) and (LastStochastic == [])) ->
-		  fix_stochastic(Stocks#sec.data, beginning);
-	      true ->
-		  []
-	  end,
-    Stochastic#analysis{result=lists:append([Res, Stochastic#analysis.result])}.
 
 %%====================================================================
 %% Internal functions
@@ -176,212 +60,114 @@ analyse_stochastic(Company) ->
 get_latest_stock_date([]) ->
     [];
 get_latest_stock_date(Data) ->
-    Last = hd(Data),
+    Last = lists:last(Data),
     Last#stock.date.
 
-get_latest_macd([]) ->
+get_latest_analysis_date(_Type, []) ->
     [];
-get_latest_macd(Data) ->
-    First = hd(Data),
-    First#macd.date.
+get_latest_analysis_date(macd, Data) ->
+    Last = lists:last(Data),
+    Last#macd.date;
+get_latest_analysis_date(atr, Data) ->
+    Last = lists:last(Data),
+    Last#atr.date;
+get_latest_analysis_date(adx, Data) ->
+    Last = lists:last(Data),
+    Last#adx.date;
+get_latest_analysis_date(mvg_avg, Data) ->
+    Last = lists:last(Data),
+    Last#mvg_avg.date;
+get_latest_analysis_date(exp_avg, Data) ->
+    Last = lists:last(Data),
+    Last#exp_avg.date;
+get_latest_analysis_date(stochastic, Data) ->
+    Last = lists:last(Data),
+    Last#stochastic.date.
 
-get_latest_atr([]) ->
-    [];
-get_latest_atr(Data) ->
-    First = hd(Data),
-    First#atr.date.    
-
-get_latest_adx([]) ->
-    [];
-get_latest_adx(Data) ->
-    First = hd(Data),
-    First#adx.date.   
-
-get_latest_mvg_avg([]) ->
-    [];
-get_latest_mvg_avg(Data) ->
-    First = hd(Data),
-    First#mvg_avg.date.   
-
-get_latest_exp_avg([]) ->
-    [];
-get_latest_exp_avg(Data) ->
-    First = hd(Data),
-    First#exp_avg.date. 
- 
-get_latest_stochastic([]) ->
-    [];
-get_latest_stochastic(Data) ->
-    First = hd(Data),
-    First#stochastic.date. 
-
-fix_macd(Stocks, beginning) ->
-    Series = [{S#stock.closing, S#stock.date} || S <- Stocks],
-    if 
-	length(Series) > 34 ->
-	    get_macd(length(Series)-34, Series);
+fix(Type, Stocks, beginning) ->
+    Series = filter_stocks(Type, Stocks),
+    case length(Series) >= ?LENGTH(Type) of 
 	true ->
+	    get_analysis(Type, ?LENGTH(Type), Series);
+	false ->
 	    []
     end;
-fix_macd(Stocks, From) ->
-    Series = [{S#stock.closing, S#stock.date} || S <- Stocks],
-    N = place_of_date(From, Series),
-    get_macd(N, Series).
+fix(Type, Stocks, From) ->
+    Series = filter_stocks(Type, Stocks),
+    case place_of_date(From, Series) of 
+	no_date_was_found ->
+	    fix(Type, Stocks, beginning);
+	N when is_integer(N) ->
+	    get_analysis(Type, N+1, Series)
+    end.
 
-fix_atr(Stocks, beginning) ->
-    Series = [{{S#stock.highest, S#stock.lowest, S#stock.closing}, 
-	       S#stock.date} || S <- Stocks],    
-    if 
-	length(Series) > 14 ->
-	    get_atr(length(Series)-15, Series);
-	true ->
-	    []
-    end;
-fix_atr(Stocks, From) ->
-    Series = [{{S#stock.highest, S#stock.lowest, S#stock.closing}, 
-	       S#stock.date} || S <- Stocks],	
-    N = place_of_date(From, Series),
-    get_atr(N, Series).
+get_analysis(macd, From, Stocks) when From >= ?MACD_LENGTH ->
+    {Data, Date} = lists:unzip(Stocks),    
+    {Macd, Signal} = data_lib:macd(lists:nthtail(From-?MACD_LENGTH, Data)),
+    lists:map(
+      fun({{FunMacd, FunSignal}, FunDate}) ->
+	      #macd{date=FunDate,
+		    value=FunMacd,
+		    signal=FunSignal}
+      end, lists:zip(lists:zip(Macd, Signal), 
+		     lists:nthtail(From-1, Date)));
 
-fix_adx(Stocks, beginning) ->
-    Series = [{{S#stock.highest,
-		S#stock.lowest,
-		S#stock.closing}, 
-	       S#stock.date} || S <- Stocks],
-    if 
-	length(Series) > 28 ->
-	    get_adx(length(Series)-28, Series);
-	true ->
-	    []
-    end;
-fix_adx(Stocks, From) ->
-    Series = [{{S#stock.highest,
-		S#stock.lowest,
-		S#stock.closing}, 
-	       S#stock.date} || S <- Stocks],
-    N = place_of_date(From, Series),
-    get_adx(N, Series).
+get_analysis(atr, From, Stocks) when From >= ?ATR_LENGTH  ->
+    {Data, Date} = lists:unzip(Stocks),    
+    Atr = data_lib:atr(lists:nthtail(From - 14, Data), 14),
+    lists:map(
+      fun({FunAtr, FunDate}) ->
+	      #atr{date=FunDate,
+		   value=FunAtr}
+      end, lists:zip(Atr, lists:nthtail(From-1, Date)));
 
-fix_mvg_avg(Stocks, beginning) ->
-    Series = [{S#stock.closing, S#stock.date} || S <- Stocks],
-    if 
-	length(Series) > 30 ->
-	    get_mvg_avg(length(Series)-31, Series);
-	true ->
-	    []
-    end;
-fix_mvg_avg(Stocks, From) ->
-    Series = [{S#stock.closing, S#stock.date} || S <- Stocks],
-    N = place_of_date(From, Series),
-    get_mvg_avg(N, Series).
+get_analysis(adx, From, Stocks) when From >= ?ADX_LENGTH ->
+    {Data, Date} = lists:unzip(Stocks),    
+    Adx = data_lib:adx(lists:nthtail(From - 28, Data), 14),
+    {DiPlus, DiMinus} = data_lib:di(lists:nthtail(From-15, Data), 14),
+    lists:map(
+      fun({{FunAdx, {FunDiPlus, FunDiMinus}}, FunDate}) ->
+	      #adx{date=FunDate,
+		   value=FunAdx,
+		   di_plus = FunDiPlus,
+		   di_minus = FunDiMinus}
+      end, lists:zip(lists:zip(Adx, lists:zip(DiPlus, DiMinus)), 
+		     lists:nthtail(From-1, Date)));
 
-fix_exp_avg(Stocks, beginning) ->
-    Series = [{S#stock.closing, S#stock.date} || S <- Stocks],
-    if 
-	length(Series) > 30 ->
-	    get_exp_avg(length(Series)-30, Series);
-	true ->
-	    []
-    end;
-fix_exp_avg(Stocks, From) ->
-    Series = [{S#stock.closing, S#stock.date} || S <- Stocks],
-    N = place_of_date(From, Series),
-    get_exp_avg(N, Series).
+get_analysis(mvg_avg, From, Stocks) when From >= ?MVG_AVG_LENGTH ->
+    {Data, Date} = lists:unzip(Stocks),
+    MvgAvg10 = data_lib:mvg_avg(lists:nthtail(From-10, Data), 10),
+    MvgAvg30 = data_lib:mvg_avg(lists:nthtail(From-30, Data), 30),
+    lists:map(
+      fun({{FunMvgAvg10, FunMvgAvg30}, FunDate}) ->
+	      #mvg_avg{date=FunDate,
+		       ten=FunMvgAvg10,
+		       thirty=FunMvgAvg30}
+      end, lists:zip(lists:zip(MvgAvg10, MvgAvg30), 
+		     lists:nthtail(From-1, Date)));
 
-fix_stochastic(Stocks, beginning) ->
-    Series = [{{S#stock.closing, S#stock.highest, S#stock.lowest}, 
-	       S#stock.date} || S <- Stocks],
-    if 
-	length(Series) > 13 ->
-	    get_stochastic(length(Series)-13, Series);
-	true ->
-	    []
-    end;
-fix_stochastic(Stocks, From) ->
-    Series = [{{S#stock.closing, S#stock.highest, S#stock.lowest}, 
-	       S#stock.date} || S <- Stocks],
-    N = place_of_date(From, Series),
-    get_stochastic(N, Series).
+get_analysis(exp_avg, From, Stocks) when From >= ?EXP_AVG_LENGTH ->
+    {Data, Date} = lists:unzip(Stocks),    
+    ExpAvg10 = data_lib:ema(lists:nthtail(From-10, Data), 10),
+    ExpAvg30 = data_lib:ema(lists:nthtail(From-30, Data), 30),
+    lists:map(
+      fun({{FunExpAvg10, FunExpAvg30}, FunDate}) ->
+	      #exp_avg{date=FunDate,
+		       ten=FunExpAvg10,
+		       thirty=FunExpAvg30}
+      end, lists:zip(lists:zip(ExpAvg10, ExpAvg30), 
+		     lists:nthtail(From-1, Date)));
 
-get_macd(From, Stocks) ->
-    ModdedStocks = lists:reverse(lists:sublist(Stocks, From+34)),
-    {Data, Date} = lists:unzip(ModdedStocks),    
-    {Macd, Signal} = data_lib:macd(Data),
-    lists:reverse(
-      lists:map(
-	fun({{FunMacd, FunSignal}, FunDate}) ->
-		#macd{date=FunDate,
-		      value=FunMacd,
-		      signal=FunSignal}
-	end, lists:zip(lists:zip(Macd, Signal), lists:nthtail(length(Date)-From-1, Date)))).
-
-get_atr(From, Stocks) ->
-    ModdedStocks = lists:reverse(lists:sublist(Stocks, From+15)),
-    {Data, Date} = lists:unzip(ModdedStocks),    
-    Atr = data_lib:atr(Data, 14),
-    lists:reverse(
-      lists:map(
-	fun({FunAtr, FunDate}) ->
-		#atr{date=FunDate,
-		     value=FunAtr}
-	end, lists:zip(Atr, lists:nthtail(length(Date)-From-1, Date)))).
-
-get_adx(From, Stocks) ->
-    ModdedStocks = lists:reverse(lists:sublist(Stocks, From+28)),
-    {Data, Date} = lists:unzip(ModdedStocks),    
-    Adx = data_lib:adx(Data, 14),
-    {DiPlus, DiMinus} = data_lib:di(lists:nthtail(length(Data)-From-15, 
-						  Data), 14),
-    lists:reverse(
-      lists:map(
-	fun({{FunAdx, {FunDiPlus, FunDiMinus}}, FunDate}) ->
-		#adx{date=FunDate,
-		     value=FunAdx,
-		     di_plus = FunDiPlus,
-		     di_minus = FunDiMinus}
-	end, lists:zip(lists:zip(Adx, lists:zip(DiPlus, DiMinus)), 
-		       lists:nthtail(length(Date)-From-1, Date)))).
-
-get_mvg_avg(From, Stocks) ->
-    ModdedStocks = lists:reverse(lists:sublist(Stocks, From+31)),
-    {Data, Date} = lists:unzip(ModdedStocks),
-    MvgAvg10 = data_lib:mvg_avg(lists:nthtail(length(Data)-From-11, Data), 10),
-    MvgAvg30 = data_lib:mvg_avg(Data, 30),
-    lists:reverse(
-      lists:map(
-	fun({{FunMvgAvg10, FunMvgAvg30}, FunDate}) ->
-		#mvg_avg{date=FunDate,
-			 ten=FunMvgAvg10,
-			 thirty=FunMvgAvg30}
-	end, lists:zip(lists:zip(MvgAvg10, MvgAvg30), 
-		       lists:nthtail(length(Date)-From-1, Date)))).
-
-get_exp_avg(From, Stocks) ->
-    ModdedStocks = lists:reverse(lists:sublist(Stocks, From+30)),
-    {Data, Date} = lists:unzip(ModdedStocks),    
-    ExpAvg10 = data_lib:ema(lists:nthtail(length(Data)-From-10, Data), 10),
-    ExpAvg30 = data_lib:ema(Data, 30),
-    lists:reverse(
-      lists:map(
-	fun({{FunExpAvg10, FunExpAvg30}, FunDate}) ->
-		#exp_avg{date=FunDate,
-			 ten=FunExpAvg10,
-			 thirty=FunExpAvg30}
-	end, lists:zip(lists:zip(ExpAvg10, ExpAvg30), 
-		       lists:nthtail(length(Date)-From-1, Date)))).
-
-get_stochastic(From, Stocks) ->
-    ModdedStocks = lists:reverse(lists:sublist(Stocks, From+12)),
-    {Data, Date} = lists:unzip(ModdedStocks),    
-    {PercentK, PercentD} = data_lib:stochastic(Data, 10),
-    lists:reverse(
-      lists:map(
-	fun({{FunPercentK, FunPercentD}, FunDate}) ->
-		#stochastic{date=FunDate,
-			    percent_k=FunPercentK,
-			    percent_d=FunPercentD}
-	end, lists:zip(lists:zip(PercentK, PercentD), 
-		       lists:nthtail(length(Date)-From-1, Date)))).
+get_analysis(stochastic, From, Stocks) when From >= ?STOCHASTIC_LENGTH ->
+    {Data, Date} = lists:unzip(Stocks),    
+    {PercentK, PercentD} = data_lib:stochastic(lists:nthtail(From-12, Data),10),
+    lists:map(
+      fun({{FunPercentK, FunPercentD}, FunDate}) ->
+	      #stochastic{date=FunDate,
+			  percent_k=FunPercentK,
+			  percent_d=FunPercentD}
+      end, lists:zip(lists:zip(PercentK, PercentD), 
+		     lists:nthtail(From-1, Date))).
 
 place_of_date(From, Series) ->
     {Result, RightIndex} = 
@@ -401,3 +187,10 @@ place_of_date(From, Series) ->
 	searching ->
 	    no_date_was_found
     end.
+
+filter_stocks(Type, Stocks)
+  when Type == atr; Type==adx; Type==stochastic ->
+    [{{S#stock.highest, S#stock.lowest, S#stock.closing}, S#stock.date} 
+     || S <- Stocks];
+filter_stocks(_Type, Stocks) ->
+    [{S#stock.closing, S#stock.date} || S <- Stocks].

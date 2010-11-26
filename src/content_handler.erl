@@ -12,8 +12,6 @@
 -include("mnesia_defs.hrl").
 -include_lib("stdlib/include/qlc.hrl").
 
--define(UPDATE_TIMEOUT, 120000).
-
 -define(BASE_DATE, {1987,1,1}).
 
 %% API
@@ -118,25 +116,31 @@ handle_info({timeout, _, retry_timer_timeout}, #state{retry=[]}=State) ->
     {noreply, State};
 handle_info({timeout, _, retry_timer_timeout}, #state{retry=RetryList}=State) ->
     CompaniesToUpdate = [{Name, db_mysql:get_company_instrument(Name)} 
-			 || Name <- Companies],
+			 || Name <- RetryList],
     UpdatingCompanies = update_from_database(CompaniesToUpdate),
     ok = send_start_for_next_batch(UpdatingCompanies),
     erlang:start_timer(300000, self(), retry_timer_timeout),
     {noreply, State#state{retry = [],
 			  updating_content=UpdatingCompanies}};
     
-handle_info({'DOWN', MonitorRef, process, Pid, _Reason},
+handle_info({'DOWN', MonitorRef, process, Pid, Reason},
 	    #state{updating_content=UpdCont,
 		   retry=RetryList}=State) ->
     case lists:keyfind(MonitorRef, 2, UpdCont) of
 	{Name, MonitorRef, Pid} ->	    
+	    log_handler:log(
+	      "content_handler",
+	      "Received exit with reason ~p for company ~s~n", 
+	      [Reason, Name]),
 	    NewUpdCont = lists:keydelete(Name, 1, UpdCont),
 	    ok = send_start_for_next_batch(NewUpdCont),
 	    {noreply, State#state{retry = [Name | RetryList],
 				  updating_content = NewUpdCont}};
 	false ->
-	    io:format("Error: Received exit for company that wasn't in the state ~p~n", 
-		      [State]),
+	    log_handler:log(
+	      "content_handler",
+	      "Error: Received exit with reason ~p for company that wasn't in the state ~p~n", 
+	      [Reason, State]),
 	    {noreply, State}
     end;
 
@@ -150,8 +154,9 @@ handle_info({no_update_needed, Name, Pid}, #state{updating_content=UpdCont}=Stat
 	    {noreply, State#state{updating_content=NewUpdCont}};
 	false ->
 	    Pid ! finish_updating,
-	    io:format("Error: Received no_update_needed for company name ~p that wasn't in the state ~p~n", 
-		      [Name, State]),
+	    log_handler:log(
+	      "content_handler",
+	      "Error: Received no_update_needed for company name ~p that wasn't in the state ~p~n", [Name, State]),
 	    {noreply, State}
     end;
 
@@ -165,8 +170,10 @@ handle_info({updating_done, Name, Pid}, #state{updating_content=UpdCont}=State) 
 	    {noreply, State#state{updating_content=NewUpdCont}};
 	false ->
 	    Pid ! finish_updating,
-	    io:format("Error: Received updating_done for company name ~p that wasn't in the state ~p~n", 
-		      [Name, State]),
+	    log_handler:log(
+	      "content_handler",
+	      "Error: Received updating_done for company name ~p that wasn't in the state ~p~n", 
+	      [Name, State]),
 	    {noreply, State}
     end.		    
 
@@ -222,7 +229,8 @@ updating_content(Pid, Name, Instrument) ->
 		    ok
 	    end,
 	    StockList = omx_db_pop:save_instrument(Instrument, Latest, Today),
-	    
+	    [ok = db_mysql:insert_stock(Instrument, Stock) 
+	     || Stock <- StockList],
 	    Pid ! {updating_done, Name, self()};
 	false ->
 	    Pid ! {no_update_needed, Name, self()}
@@ -234,13 +242,7 @@ updating_content(Pid, Name, Instrument) ->
 
 send_start_for_next_batch([]) ->
     ok;
-send_start_for_next_batch([{_,_, Pid} | Companies]) ->
+send_start_for_next_batch([{_,_, Pid} | _Companies]) ->
     timer:sleep(2000),
     Pid ! start_updating,
     ok.
-
-get_latest_date([]) ->
-    [];
-get_latest_date(Data) ->
-    First = hd(Data),
-    First#stock.date.
