@@ -11,7 +11,7 @@
 
 -export([run_one/4, run/3, run_sim/3]).
 
--include("stocks.hrl").
+-include("mnesia_defs.hrl").
 
 %% Stocks = [{ericb, [{{2000,1,2}, 1.2}, {{2000,1,3}, 2.1}, ....]},...]
 %% Params = [{buy, ericb, [{ericb, [{10, 0.5}, {50, 0.2}]},
@@ -66,7 +66,8 @@ loop(StockStruct, BuyNSell, MarketParams, Date, EndDate) ->
 		       ({sell, _, _}, Market) ->
 			    Market
 		    end, NewMarketParams, BuyNSell),
-    NewDate = get_next_valid_date(StockStruct, Date),
+    NextDate = get_next_date(Date),
+    NewDate = get_next_valid_date(StockStruct, NextDate, EndDate),
     loop(StockStruct, BuyNSell, NewerMarketParams, NewDate, EndDate).
 
 buy(StockStruct, StockName, Date, Market) ->  
@@ -75,21 +76,26 @@ buy(StockStruct, StockName, Date, Market) ->
 	false ->
 	    Risk = Market#market.risk,
 	    StockVal = get_value_from_date(StockStruct, StockName, Date, 0),
-	    {NrOfStocks, MoneyLeft} = calculate_purchase(StockVal, Money, Risk),
+	    {NrOfStocks, MoneyLeft} =calculate_purchase(StockVal, Money, Risk),
 	    case lists:keyfind(StockName, 1, Market#market.holdings) of
 		{Stockname, OldNr} ->
 		    Market#market{money=MoneyLeft, 
-				  holdings = lists:keyreplace(StockName, 
-							      1, Market#market.holdings,
-							      {StockName, 
-							       OldNr+NrOfStocks}),
-				  history = [{buy, Stockname, Date, StockVal, NrOfStocks} |
+				  holdings = lists:keyreplace(
+					       StockName, 
+					       1, Market#market.holdings,
+					       {StockName, 
+						OldNr+NrOfStocks}),
+				  history = [{buy, Stockname, Date, StockVal,
+					      NrOfStocks*StockVal,
+					      NrOfStocks} |
 					     Market#market.history]};
 		false ->
 		    Market#market{money=MoneyLeft, 
 				  holdings = [{StockName,NrOfStocks} | 
 					      Market#market.holdings],
-				  history = [{buy, StockName, Date, StockVal, NrOfStocks} |
+				  history = [{buy, StockName, Date, StockVal, 
+					      NrOfStocks*StockVal,
+					      NrOfStocks} |
 					     Market#market.history]}
 	    end;
 	true ->
@@ -189,18 +195,15 @@ get_latest_date(StockStruct) ->
 			end, StockStruct),
     element(1, hd(lists:reverse(lists:sort(Results)))).
 
-get_next_valid_date(StockStruct, Date) ->
-    get_next_valid_date(StockStruct, Date, 30).
-
-get_next_valid_date(_StockStruct, _Date, 0) ->
-    no_valid_date;
-get_next_valid_date(StockStruct, Date, Days) ->
-    NextDate = get_next_date(Date),
-    case is_valid_date(StockStruct, NextDate) of
+get_next_valid_date(_StockStruct, EndDate, EndDate) ->
+    EndDate;
+get_next_valid_date(StockStruct, Date, EndDate) ->
+    case is_valid_date(StockStruct, Date) of
 	true ->
-	    NextDate;
+	    Date;
 	false ->
-	    get_next_valid_date(StockStruct, NextDate, Days-1)
+	    NextDate = get_next_date(Date),
+	    get_next_valid_date(StockStruct, NextDate, EndDate)
     end.
 
 get_next_date(Date) ->

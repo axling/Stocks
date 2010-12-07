@@ -181,7 +181,18 @@ analyse_company(Pid, Company, Types) ->
 		     db_mysql:get_all_stocks(Company)
 	     end,
     AnalysisFun =
-	fun(Type) ->
+	fun(optimize) ->
+		AllStocks = db_mysql:get_all_stocks(Company),
+		{Market, Point, StartDate, EndDate} = 
+		    analysis_lib:analyse_optimal_trading(
+		      AllStocks,#optimize{market=#market{}, 
+					  type = simulated_annealing,
+					  retries=8, sa_iterations=250}),
+		ok = db_mysql:clear_optimize_result(Company),
+		ok = db_mysql:insert_optimize_result(Company, Market, 
+						     Point, StartDate, EndDate, 
+						     ga);
+	   (Type) ->
 		LatestAnalysed = db_mysql:get(Type, Company, 1),
 		Results = analysis_lib:analyse(Type, Stocks, LatestAnalysed),
 		[ok = db_mysql:insert(Type, Company, Res) || Res <- Results]
@@ -189,10 +200,11 @@ analyse_company(Pid, Company, Types) ->
     case Types of
 	all ->
 	    lists:foreach(AnalysisFun, [macd, atr, adx, mvg_avg, exp_avg,
-				       stochastic]);
+					stochastic, optimize]);
 	Types ->
 	    lists:foreach(AnalysisFun, Types)
     end,
+    
     Pid ! {analysis_done, Company, self()},
     receive finish_analysis -> ok end.
 

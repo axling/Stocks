@@ -10,9 +10,9 @@
 -export([hill_climb/2, hill_climb/3, climb_until/3, climb_until/4, 
 	 simulated_annealing/5]).
 
--define(MAX, 1000).
+-define(MAX, 100).
 
--include("stocks.hrl").
+-include("mnesia_defs.hrl").
 
 hill_climb(OptimizeFun, Dimension) when is_function(OptimizeFun),
 					is_integer(Dimension) ->

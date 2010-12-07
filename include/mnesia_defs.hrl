@@ -23,3 +23,23 @@
 -record(task, {id, name, type, time, action}).
 
 
+-record(market, {tax_factor = 0.3,
+		 courtage = 10,
+		 holdings = [],
+		 min = 1000,
+		 money = 5000,
+		 risk = 0.5,
+		 history = []}).
+
+-record(optimize, {
+	  market=#market{},
+	  type=simulated_annealing,
+	  criteria,
+	  retries=10,
+	  sa_temperature=10000,
+	  sa_reduction=0.9,
+	  sa_iterations=100,
+	  ga_mutation=85,
+	  ga_generations=100,
+	  cu_limit=20000
+	 }).

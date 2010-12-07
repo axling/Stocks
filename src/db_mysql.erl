@@ -15,6 +15,8 @@
 	 lookup_stock/3, 
 	 insert_stock/2,
 	 insert/3,
+	 insert_optimize_result/6,
+	 clear_optimize_result/1,
 	 count_all_stocks/1,
 	 get/3,
 	 get_all/2,
@@ -50,6 +52,16 @@ insert_stock(Instrument, #stock{}=Stock)
   when is_list(Instrument) ->
     check_return(gen_server:call(?SERVER, {insert_stock, Instrument, Stock}, 
 				 infinity)).
+clear_optimize_result(Company) ->
+    check_return(gen_server:call(?SERVER, {clear_optimize_result, Company})).
+
+insert_optimize_result(Company, #market{}=Market, Point, StartDate, 
+		       EndDate, Type)
+  when is_tuple(Point), is_atom(Type), is_list(Company), is_tuple(StartDate),
+       is_tuple(EndDate) ->
+    check_return(gen_server:call(?SERVER, {insert_optimize_result, Company, 
+					   Market, Point, StartDate, EndDate, 
+					   Type})).
 
 get_all_companies() ->
     check_return(gen_server:call(?SERVER, get_all_companies, infinity)).
@@ -134,7 +146,7 @@ handle_call({lookup_stock, Name, Date}, _From, #state{}=State) ->
 	    {reply, {error, mysql:get_result_reason(Res)}, State}
     end;
 handle_call({lookup_stock, Name, FromDate, ToDate}, _From, #state{}=State) ->
-    Query = "select date, highest, lowest, closing, turnover, volume, completions from quotes_stockquote inner join quotes_company on quotes_stockquote.company_id = quotes_company.id where name='" ++ Name ++ "' and date >='" ++ date_lib:convert_date_e_s(FromDate) ++"' and date <= '" ++ date_lib:convert_date_e_s(ToDate) ++ "'",
+    Query = "select date, highest, lowest, closing, turnover, volume, completions from quotes_stockquote inner join quotes_company on quotes_stockquote.company_id = quotes_company.id where name='" ++ Name ++ "' and date >='" ++ date_lib:convert_date_e_s(FromDate) ++"' and date <= '" ++ date_lib:convert_date_e_s(ToDate) ++ "' order by date asc",
     case mysql:fetch(1, Query, infinity) of
 	{data, Res} ->
 	    Return = [#stock{date=Date, highest=Highest, 
@@ -157,7 +169,7 @@ handle_call({count_all_stocks, Company}, _From, #state{}=State) ->
     end;
 
 handle_call({get_all_stocks, Company}, _From, #state{}=State) ->
-    Query = "select date, highest, lowest, closing, turnover, volume, completions from quotes_stockquote inner join quotes_company on quotes_stockquote.company_id = quotes_company.id where name='" ++ Company ++ "'",
+    Query = "select date, highest, lowest, closing, turnover, volume, completions from quotes_stockquote inner join quotes_company on quotes_stockquote.company_id = quotes_company.id where name='" ++ Company ++ "' order by date asc",
     case mysql:fetch(1, Query, infinity) of
 	{data, Res} ->
 	    Return = [#stock{date=Date, highest=Highest, 
@@ -171,7 +183,7 @@ handle_call({get_all_stocks, Company}, _From, #state{}=State) ->
     end;
 handle_call({get_nr_of_stocks, Company, Limit}, _From, #state{}=State) ->
     Query = "select date, highest, lowest, closing, turnover, volume, completions from quotes_stockquote inner join quotes_company on quotes_stockquote.company_id = quotes_company.id where name='" ++ Company ++ 
-	"' order by date desc limit 0, " ++ integer_to_list(Limit),
+	"' order by date asc limit 0, " ++ integer_to_list(Limit),
     case mysql:fetch(1, Query, infinity) of
 	{data, Res} ->
 	    Return = [#stock{date=Date, highest=Highest, 
@@ -198,7 +210,7 @@ handle_call({get, Type, Company, Limit}, _From, #state{}=State) ->
     Query = "select " ++ get_fields(Type) ++ " from quotes_" ++ Type ++ 
 	" inner join quotes_company on quotes_" ++ Type ++ 
 	".company_id = quotes_company.id where name='" ++ Company ++ 
-	"' order by date desc limit 0, " ++ integer_to_list(Limit),
+	"' order by date asc limit 0, " ++ integer_to_list(Limit),
     case mysql:fetch(1, Query, infinity) of
 	{data, Res} ->
 	    Return = get_return_struct(Type, mysql:get_result_rows(Res)),     
@@ -235,10 +247,7 @@ handle_call({insert_stock , Instrument, Stock}, _From, #state{}=State) ->
 	    {reply, ok, State}
     end;
 handle_call({insert, Type, Company, Entry}, _From, State) ->
-    FetchQuery = "select id from quotes_company where name='" ++
-	Company ++ "'",
-    {data, IdRes} = mysql:fetch(1, FetchQuery, infinity),
-    [[CompanyId]] = mysql:get_result_rows(IdRes),
+    CompanyId = get_company_id(Company),
     InsertQuery = 
 	list_to_bitstring(
 	  "insert into quotes_" ++ Type ++ 
@@ -251,12 +260,83 @@ handle_call({insert, Type, Company, Entry}, _From, State) ->
 			   end, infinity) of
 	{aborted, {Reason, {rollback_result, Result}}} ->
 	    log_handler:log(db_mysql, 
-			    "Error in insert with reason ~p for company ~s and entry ~p, rollback initated with result~p~n",
+			    "Error in insert with reason ~p for company ~s and "
+			    "entry ~p, rollback initated with result~p~n",
 			    [Reason, Company, Entry, Result]),
 	    {reply, {error, {Reason, Result}}, State};
 	{atomic, _Result} ->
 	    {reply, ok, State}
     end;
+handle_call({insert_optimize_result, Company, Market, {X1, X2, X3, X4},
+	     StartDate, EndDate, Type}, _From, State) ->
+    CompanyId = get_company_id(Company),    
+    InsertResultQuery = 
+	list_to_bitstring(
+	  "insert into quotes_optimizeresult (company_id, date_created, type, " 
+	  "point, tax_factor, courtage, start_money, end_money, start_date, "
+	  "end_date) values (" ++
+	  integer_to_list(CompanyId) ++ ", \"" ++ 
+	  date_lib:convert_date_e_s(date_lib:today()) ++ 
+	  "\", \"" ++ atom_to_list(Type) ++ "\", \"" ++ 
+	  number_to_list(X1) ++ ";" ++ number_to_list(X2) ++ ";" ++ 
+	  number_to_list(X3) ++ ";" ++ number_to_list(X4) ++ "\", " ++
+	  number_to_list(Market#market.tax_factor) ++ ", " ++ 
+	  integer_to_list(Market#market.courtage) ++ ", " ++ 
+	  "5000" ++ ", " ++ number_to_list(Market#market.money) ++ 
+	  ", \"" ++ date_lib:convert_date_e_s(StartDate) ++  
+	  "\", \"" ++ date_lib:convert_date_e_s(EndDate) ++ "\")"),
+    mysql:prepare(insert_optimize_result, InsertResultQuery),
+    case mysql:transaction(1, 
+			   fun() ->
+				   mysql:execute(insert_optimize_result)
+			   end, infinity) of
+	{aborted, {Reason, {rollback_result, Result}}} ->
+	    log_handler:log(db_mysql, 
+			    "Error in insert_optimize_result with reason ~p for"
+			    " company ~s and query: ~p~nRollback initated with"
+			    " result~p~n",
+			    [Reason, Company, InsertResultQuery, Result]),
+	    {reply, {error, {Reason, Result}}, State};
+	{atomic, _Result} ->
+	    Result = insert_optimizeresult_history(Company, Market),
+	    {reply, Result, State}
+    end;
+handle_call({clear_optimize_result, Company}, _From, State) ->
+    CompanyId = get_company_id(Company),
+    GetResultIdQuery = 
+	"select id from quotes_optimizeresult where company_id=" ++ 
+	integer_to_list(CompanyId),
+    {data, ResultIdRes} = mysql:fetch(1, GetResultIdQuery),
+    case mysql:get_result_rows(ResultIdRes) of
+	[[ResultId]] ->
+	    DeleteResultQuery = 
+		list_to_bitstring("delete from quotes_optimizeresult where " 
+				  "company_id=" ++ integer_to_list(CompanyId)),
+	    DeleteResultHistoryQuery = 
+		list_to_bitstring("delete from quotes_optimizehistory where "
+				  "result_id=" ++ integer_to_list(ResultId)),
+	    mysql:prepare(delete_result, DeleteResultQuery),
+	    mysql:prepare(delete_history, DeleteResultHistoryQuery),
+	    case mysql:transaction(1,
+				   fun() ->
+					   mysql:execute(delete_result),
+					   mysql:execute(delete_history)
+				   end, infinity) of
+		{aborted, {Reason, {rollback_result, Result}}} ->
+		    log_handler:log(db_mysql, 
+				    "Error in delete_result or delete_history "
+				    "with reason ~p for company ~s and queries:"
+				    " ~p, ~p~nRollback initated with result "
+				    "~p~n",
+				    [Reason, Company, DeleteResultQuery, 
+				     DeleteResultHistoryQuery, Result]),
+		    {reply, {error, {Reason, Result}}, State};
+		{atomic, _Result} ->
+		    {reply, ok, State}
+	    end;
+	[] ->
+	    {reply, ok, State}		
+    end;		
 handle_call(get_all_companies, _From,  State) ->
     Query = "select name, instrument from quotes_company",
     case mysql:fetch(1, Query, infinity) of
@@ -353,6 +433,58 @@ start_mysql(Host, Port, User, Password, Database) ->
 	{error, Reason} ->
 	    {error, Reason}
     end.
+
+get_company_id(Company) ->
+    {data, CompanyRes} = mysql:fetch(1, "select id from quotes_company where "
+				     "name = \"" ++ Company ++ "\""),
+    [[CompanyId]] = mysql:get_result_rows(CompanyRes),
+    CompanyId.
+
+insert_optimizeresult_history(Company, Market) ->
+    CompanyId = get_company_id(Company),
+    FetchQuery = "select id from quotes_optimizeresult where company_id = " ++ 
+	integer_to_list(CompanyId),
+    {data, Res} = mysql:fetch(1, FetchQuery),
+    [[Id]] = mysql:get_result_rows(Res),
+    InsertHistoryList = 
+	[list_to_bitstring(
+	   "insert into quotes_optimizehistory (result_id, type, date, price, "
+	   "number) values (" ++ integer_to_list(Id) ++ ", \"" ++ 
+	   atom_to_list(SimType) ++ "\", \"" ++ 
+	   date_lib:convert_date_e_s(SimDate) 
+	   ++ "\", " ++ number_to_list(SimPrice) ++ ", " ++ 
+	   integer_to_list(SimNumber) ++ ")") || 
+	    {SimType, _, SimDate,SimPrice, _Amount, SimNumber} <- 
+		Market#market.history],
+    CompoundedRes = 
+	lists:map(
+	  fun(AQuery) ->
+		  mysql:prepare(insert_result_history, AQuery),
+		  case mysql:transaction(
+			 1, fun() ->
+				    mysql:execute(insert_result_history)
+			    end, infinity) of
+		      {aborted, {Reason, {rollback_result, Result}}} ->
+			  log_handler:log(
+			    db_mysql, 
+			    "Error in insert of result history with reason ~p "
+			    "for company ~s and query: ~p~nRollback initated "
+			    "with result ~p~n",
+			    [Reason, Company, AQuery, Result]),
+			  {error, {Reason, Result}};
+		      {atomic, _Result} ->
+			  ok
+		  end
+	  end, InsertHistoryList),
+    case lists:filter(fun(ok) -> false; (_E) -> true end, 
+		      CompoundedRes) of
+	[] ->
+	    ok;
+	Else ->
+	    {error, {several_insert_result_history_errors, 
+		     Else}}
+    end.
+
 		
 number_to_list(N) when is_float(N) ->
     [S] = io_lib:format("~.3f", [N]),
@@ -427,6 +559,6 @@ convert_entry(CompanyId, #macd{date=Date, value=Macd, signal=Signal}) ->
 	"\", " ++ number_to_list(Macd) ++ ", " ++ number_to_list(Signal).
     
 check_return({error, Reason}) ->
-    erlang:error(bitstring_to_list(Reason));
+    erlang:error(Reason);
 check_return(Else) ->
     Else.
