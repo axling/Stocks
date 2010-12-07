@@ -191,7 +191,7 @@ analyse_company(Pid, Company, Types) ->
 		ok = db_mysql:clear_optimize_result(Company),
 		ok = db_mysql:insert_optimize_result(Company, Market, 
 						     Point, StartDate, EndDate, 
-						     ga);
+						     simulated_annealing);
 	   (Type) ->
 		LatestAnalysed = db_mysql:get(Type, Company, 1),
 		Results = analysis_lib:analyse(Type, Stocks, LatestAnalysed),
