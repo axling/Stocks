@@ -1,24 +1,22 @@
 %%%-------------------------------------------------------------------
-%%% File    : log_handler.erl
+%%% File    : stocks_hub.erl
 %%% Author  : Erik Axling <dude@CodeMachine>
 %%% Description : 
 %%%
-%%% Created : 18 Nov 2010 by Erik Axling <dude@CodeMachine>
+%%% Created :  1 May 2011 by Erik Axling <dude@CodeMachine>
 %%%-------------------------------------------------------------------
--module(log_handler).
+-module(stocks_hub).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, log/3]).
+-export([start_link/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
--define(SERVER, ?MODULE).
-
--record(state, {file}).
+-record(state, {}).
 
 %%====================================================================
 %% API
@@ -29,9 +27,6 @@
 %%--------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
-
-log(Category, Format, Args) ->
-    gen_server:cast(?SERVER, {log, Category, Format, Args}).
 
 %%====================================================================
 %% gen_server callbacks
@@ -45,17 +40,7 @@ log(Category, Format, Args) ->
 %% Description: Initiates the server
 %%--------------------------------------------------------------------
 init([]) ->
-    process_flag(trap_exit, true),
-    {Date, Time} = calendar:universal_time_to_local_time(
-					  calendar:now_to_datetime(now())),
-    {ok, CurrentDir} = file:get_cwd(),
-    NewDir = filename:join(CurrentDir, "logs"),    
-    
-    FileName = lists:concat([date_lib:convert_date_e_s(Date), "_", 
-			     date_lib:convert_time_e_s(Time), ".log"]),
-    
-    {ok, LogFile} = file:open(filename:join(NewDir, FileName), [write]),
-    {ok, #state{file=LogFile}}.
+    {ok, #state{}}.
 
 %%--------------------------------------------------------------------
 %% Function: %% handle_call(Request, From, State) -> {reply, Reply, State} |
@@ -66,8 +51,35 @@ init([]) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling call messages
 %%--------------------------------------------------------------------
-handle_call(_Msg, _From, State) ->
-    {reply, ok, State}.
+handle_call({update, Stock}, _From, State) when is_atom(Stock) ->
+    ok = quote_crawl:update(Stock),    
+    {reply, ok, State};
+handle_call({fetch, Stock, Date}, _From, State) when is_atom(Stock) ->
+    ok = fetch_stock(Stock, Date),    
+    {reply, ok, State};
+handle_call({fetch, Stock, DateFrom, DateTo}, _From, State) 
+  when is_atom(Stock) ->
+    ok = fetch_stock(Stock, DateFrom, DateTo),    
+    {reply, ok, State};
+
+handle_call({update, Stocks}, _From, State) when is_list(Stocks) ->
+    {reply, ok, State};
+handle_call({fetch, Stocks, Date}, _From, State) when is_list(Stocks) ->
+    {reply, ok, State};
+handle_call({fetch, Stocks, DateFrom, DateTo}, _From, State) 
+  when is_list(Stocks) ->
+    {reply, ok, State};
+
+handle_call({update, all}, _From, State) ->
+    {reply, ok, State};
+handle_call({fetch, all, Date}, _From, State) ->
+    {reply, ok, State};
+handle_call({fetch, all, DateFrom, DateTo}, _From, State) ->
+    {reply, ok, State};
+    
+handle_call(_Request, _From, State) ->
+    Reply = ok,
+    {reply, Reply, State}.
 
 %%--------------------------------------------------------------------
 %% Function: handle_cast(Msg, State) -> {noreply, State} |
@@ -75,9 +87,6 @@ handle_call(_Msg, _From, State) ->
 %%                                      {stop, Reason, State}
 %% Description: Handling cast messages
 %%--------------------------------------------------------------------
-handle_cast({log, Category, Format, Args}, #state{file=File}=State) ->
-    io:format(File, "~s: " ++ Format, [Category | Args]),
-    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -97,8 +106,8 @@ handle_info(_Info, State) ->
 %% cleaning up. When it returns, the gen_server terminates with Reason.
 %% The return value is ignored.
 %%--------------------------------------------------------------------
-terminate(_Reason, #state{file=File}) ->
-    ok = file:close(File).
+terminate(_Reason, _State) ->
+    ok.
 
 %%--------------------------------------------------------------------
 %% Func: code_change(OldVsn, State, Extra) -> {ok, NewState}

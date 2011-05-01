@@ -29,6 +29,8 @@
 		 min = 1000,
 		 money = 5000,
 		 risk = 0.5,
+		 stop_loss,
+		 portfolio_value=[],
 		 history = []}).
 
 -record(optimize, {

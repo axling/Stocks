@@ -187,7 +187,7 @@ analyse_company(Pid, Company, Types) ->
 		    analysis_lib:analyse_optimal_trading(
 		      AllStocks,#optimize{market=#market{}, 
 					  type = simulated_annealing,
-					  retries=8, sa_iterations=250}),
+					  retries=10, ga_generations=200}),
 		ok = db_mysql:clear_optimize_result(Company),
 		ok = db_mysql:insert_optimize_result(Company, Market, 
 						     Point, StartDate, EndDate, 

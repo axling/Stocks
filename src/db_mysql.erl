@@ -479,13 +479,50 @@ insert_optimizeresult_history(Company, Market) ->
     case lists:filter(fun(ok) -> false; (_E) -> true end, 
 		      CompoundedRes) of
 	[] ->
-	    ok;
+	    insert_result_portfolio_value(Company, Id, Market);
 	Else ->
 	    {error, {several_insert_result_history_errors, 
 		     Else}}
     end.
 
-		
+insert_result_portfolio_value(Company, Id, Market) ->
+    InsertPortfolio = 
+	[list_to_bitstring(
+	   "insert into quotes_optimizeportfoliovalue (result_id, date, value) "
+	   "values (" ++ integer_to_list(Id) ++ ", \"" ++ 
+	   date_lib:convert_date_e_s(Date) 
+	   ++ "\", " ++ number_to_list(Value) ++ ")") || 
+	    {Date, Value} <- 
+		Market#market.portfolio_value],    
+    CompoundedRes = 
+	lists:map(
+	  fun(AQuery) ->
+		  mysql:prepare(insert_portfolio, AQuery),
+		  case mysql:transaction(
+			 1, fun() ->
+				    mysql:execute(insert_portfolio)
+			    end, infinity) of
+		      {aborted, {Reason, {rollback_result, Result}}} ->
+			  log_handler:log(
+			    db_mysql, 
+			    "Error in insert of portfolio value with reason ~p "
+			    "for company ~s and query: ~p~nRollback initated "
+			    "with result ~p~n",
+			    [Reason, Company, AQuery, Result]),
+			  {error, {Reason, Result}};
+		      {atomic, _Result} ->
+			  ok
+		  end
+	  end, InsertPortfolio),
+    case lists:filter(fun(ok) -> false; (_E) -> true end, 
+		      CompoundedRes) of
+	[] ->
+	    ok;
+	Else ->
+	    {error, {several_insert_portfolio_errors, 
+		     Else}}
+    end.
+    
 number_to_list(N) when is_float(N) ->
     [S] = io_lib:format("~.3f", [N]),
     S;

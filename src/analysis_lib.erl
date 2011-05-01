@@ -8,7 +8,6 @@
 -module(analysis_lib).
 
 -include("mnesia_defs.hrl").
--include_lib("stdlib/include/qlc.hrl").
 
 %% API
 -export([analyse/3,
@@ -77,7 +76,7 @@ do_optimize_and_test(_OptimizeStocks, TestStocks, #optimize{retries=0},
 	  end, {0, #market{}, {0,0,0,0}}, History),
     StartDate = start_date(TestStocks),
     EndDate = end_date(TestStocks),
-    {M, {abs(X1)/1000, abs(X2)/1000, abs(X3)/1000, abs(X4)/1000},
+    {M, {(abs(X1) rem 30) + 1, abs(X2)/1000, (abs(X3) rem 30) + 1, abs(X4)/1000},
      StartDate, EndDate};
 do_optimize_and_test(OptimizeStocks, TestStocks, 
 		     #optimize{market=Market,criteria=Criteria, 
@@ -87,12 +86,16 @@ do_optimize_and_test(OptimizeStocks, TestStocks,
 							   OptimizingFun),
     M = esim:run_one([{S#stock.date, S#stock.closing} ||
 			 S <- TestStocks],
-		     [{5, abs(X1)/1000}, {30, abs(X2)/1000}],
-		     [{5, abs(X3)/1000}, {30, abs(X4)/1000}],
+		     [{(abs(X1) rem 30) + 1, abs(X2)/1000}],
+		     [{(abs(X3) rem 30) + 1, abs(X4)/1000}],		     
 		     Market),
     case check_criteria(M, Market, Criteria) of
 	true ->
-	    {M, {abs(X1)/1000, abs(X2)/1000, abs(X3)/1000, abs(X4)/1000}};
+	    StartDate = start_date(TestStocks),
+	    EndDate = end_date(TestStocks),
+	    {M, {(abs(X1) rem 30) + 1, abs(X2)/1000, (abs(X3) rem 30) + 1, 
+		 abs(X4)/1000},
+	     StartDate, EndDate};
 	false ->
 	    do_optimize_and_test(OptimizeStocks, TestStocks, 
 				 Params#optimize{retries=Retries-1},
@@ -108,8 +111,8 @@ optimize_fun(OptimizeStocks, Market) ->
     fun({X1, X2, X3, X4}) ->
 	    M = esim:run_one([{S#stock.date, S#stock.closing} ||
 				 S <- OptimizeStocks],
-			     [{5, abs(X1)/1000}, {30, abs(X2)/1000}],
-			     [{5, abs(X3)/1000}, {30, abs(X4)/1000}],
+			     [{(abs(X1) rem 30) + 1, abs(X2)/1000}],
+			     [{(abs(X3) rem 30) + 1, abs(X4)/1000}],
 			     Market),
 	    M#market.money
     end.
